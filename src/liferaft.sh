@@ -212,9 +212,101 @@ verify_local_password() {
     printf '%s\n' "$pass" | "$helper" "$user" >/dev/null 2>&1
 }
 
+IDLE_SECS=60
+FAIL_FILE="/run/project-anthony-auth-fails"
+
+session_idle_lock() {
+    echo ""
+    echo " Session timed out after ${IDLE_SECS}s idle. Unlock again."
+    sleep 2
+    exit 0
+}
+
+# TTY3 menu/crash prompts. Idle timeout relocks (systemd restarts a locked TUI).
+# Long jobs (ddrescue, timeshift, less) are not wrapped.
+tui_read() {
+    local silent=0 dest prompt
+    [ "${1:-}" = "-s" ] && { silent=1; shift; }
+    dest="$1"
+    prompt="${2-}"
+    if [ "${ON_KERNEL_VT:-0}" -ne 1 ]; then
+        if [ "$silent" -eq 1 ]; then
+            IFS= read -r -s -p "$prompt" "$dest" </dev/tty || true
+        else
+            IFS= read -r -p "$prompt" "$dest" </dev/tty || true
+        fi
+        return 0
+    fi
+    if [ "$silent" -eq 1 ]; then
+        IFS= read -r -s -t "$IDLE_SECS" -p "$prompt" "$dest" </dev/tty || session_idle_lock
+    else
+        IFS= read -r -t "$IDLE_SECS" -p "$prompt" "$dest" </dev/tty || session_idle_lock
+    fi
+}
+
+load_auth_fails() {
+    local n=""
+    [ -f "$FAIL_FILE" ] && n=$(tr -cd '0-9' < "$FAIL_FILE" | head -c 8)
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    [ "$n" -gt 15 ] && n=15
+    printf '%s\n' "$n"
+}
+
+save_auth_fails() {
+    umask 077
+    printf '%s\n' "$1" > "$FAIL_FILE"
+    chmod 600 "$FAIL_FILE" 2>/dev/null || true
+}
+
+clear_auth_fails() {
+    rm -f "$FAIL_FILE"
+}
+
+AUTH_LOCKOUT=5
+
+force_auth_lockout_shutdown() {
+    echo ""
+    echo " Five failed unlock attempts. Shutting down."
+    sleep 3
+    systemctl poweroff --no-wall >/dev/null 2>&1 || shutdown -h now
+    exit 1
+}
+
+note_auth_failure() {
+    fails=$((fails + 1))
+    [ "$fails" -gt 15 ] && fails=15
+    save_auth_fails "$fails"
+    echo ""
+    echo " Authentication failed. (${fails}/${AUTH_LOCKOUT})"
+    if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
+        force_auth_lockout_shutdown
+    fi
+    auth_fail_wait "$fails"
+}
+
+# 1–2: 10s. 3: 60s. 4: 3min. 5: shutdown. Count lives in /run across TTY restarts.
+auth_fail_wait() {
+    local fails="$1" delay=0
+    case "$fails" in
+        1|2) delay=10 ;;
+        3) delay=60 ;;
+        4) delay=180 ;;
+        *) return 0 ;;
+    esac
+    echo " Waiting ${delay}s before next attempt..."
+    sleep "$delay"
+}
+
 require_console_auth() {
-    local default_user typed user pass fails=0
+    local default_user typed user pass fails
+    fails=$(load_auth_fails)
     default_user=$(default_unlock_user)
+    if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
+        force_auth_lockout_shutdown
+    fi
+    if [ "$fails" -ge 1 ] && [ "$fails" -lt "$AUTH_LOCKOUT" ]; then
+        auth_fail_wait "$fails"
+    fi
     while true; do
         clear
         echo "========================================================="
@@ -233,7 +325,9 @@ require_console_auth() {
             echo " User (or 'desktop' to leave):"
         fi
         typed=""
-        IFS= read -r -p " " typed </dev/tty || true
+        if ! IFS= read -r -t "$IDLE_SECS" -p " " typed </dev/tty; then
+            continue
+        fi
         if [ -z "$typed" ]; then
             user="$default_user"
         else
@@ -244,29 +338,28 @@ require_console_auth() {
             exit 0
         fi
         if ! unlock_account_ok "$user"; then
-            echo ""
-            echo " Authentication failed."
-            fails=$((fails + 1))
-            sleep $((fails >= 5 ? 8 : 2))
+            note_auth_failure
             continue
         fi
         echo ""
-        IFS= read -r -s -p " Password: " pass </dev/tty || true
+        pass=""
+        if ! IFS= read -r -s -t "$IDLE_SECS" -p " Password: " pass </dev/tty; then
+            echo ""
+            continue
+        fi
         echo ""
         if [ -n "$pass" ] && verify_local_password "$user" "$pass"; then
             pass=""
             unset pass
+            clear_auth_fails
             echo ""
-            echo "✔ Console unlocked."
+            echo "✔ Console unlocked. Idle lock in ${IDLE_SECS}s."
             sleep 1
             return 0
         fi
         pass=""
         unset pass
-        echo ""
-        echo " Authentication failed."
-        fails=$((fails + 1))
-        sleep $((fails >= 5 ? 8 : 2))
+        note_auth_failure
     done
 }
 
@@ -287,7 +380,7 @@ execute_system_teardown() {
     echo "🐕 Stopping crash watchdog..."
     systemctl stop project-anthony-monitor.service 2>/dev/null || true
     systemctl disable project-anthony-monitor.service 2>/dev/null || true
-    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor
+    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor /run/project-anthony-auth-fails
     if [ -z "${DPKG_MAINTSCRIPT_PACKAGE:-}" ]; then
         rm -f /etc/systemd/system/project-anthony-monitor.service
         rm -f /usr/local/bin/project-anthony-monitor
@@ -462,7 +555,7 @@ crash_recovery_prompt() {
     echo "Would you like to restore from backup? [y/n]"
     echo "---------------------------------------------------------"
     echo ""
-    read -p "Enter choice [y/n]: " crash_choice
+    tui_read crash_choice "Enter choice [y/n]: "
     echo ""
 
     if [[ "$crash_choice" == "y" || "$crash_choice" == "Y" ]]; then
@@ -475,11 +568,11 @@ crash_recovery_prompt() {
             echo "Opening the full Timeshift restore wizard instead..."
             sudo timeshift --restore
         fi
-        read -p "Press [Enter] to continue..." fakeKey
+        tui_read fakeKey "Press [Enter] to continue..."
         return 0
     fi
 
-    read -p "Would you like to return to the desktop? [y/n]: " desk_choice
+    tui_read desk_choice "Would you like to return to the desktop? [y/n]: "
     echo ""
     if [[ "$desk_choice" == "y" || "$desk_choice" == "Y" ]]; then
         escape_to_desktop
@@ -589,7 +682,7 @@ do
 	echo "=========================================="
 	echo " Access: Ctrl+Alt+X (desktop)  |  Ctrl+Alt+F3 (frozen)  |  Alt+SysRq+R then F3 (stuck keyboard)"
 	echo "=========================================="
-	read -p "Enter choice: " choice
+	tui_read choice "Enter choice: "
 
 	case $choice in
 		1)
@@ -618,7 +711,7 @@ do
 			echo " c) Return to Main Menu"
 			echo " x) EMERGENCY: Exit straight to desktop"
 			echo "-------------------------------------------"
-			read -r -p "Enter choice [a-x]: " desktop_choice </dev/tty
+			tui_read desktop_choice "Enter choice [a-x]: "
 			echo ""
 
 			case $desktop_choice in
@@ -651,17 +744,17 @@ do
 					else
 						echo "⛔ Action blocked! Soft-replacing a compositor on Wayland will crash your session."
 					fi
-					read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
+					tui_read fakeKey "Press [Enter] key to continue..."
 					;;
 				b)
 					echo "⚠️ WARNING: This action will instantly force-close all open applications!"
-					read -r -p "Are you sure you want to completely reload LightDM? [y/n]: " confirm_reset </dev/tty
+					tui_read confirm_reset "Are you sure you want to completely reload LightDM? [y/n]: "
 					if [ "$confirm_reset" == "y" ] || [ "$confirm_reset" == "Y" ]; then
 						echo "🚀 Restarting LightDM Display Manager..."
 						sudo systemctl restart display-manager
 					else
 						echo "❌ Reset sequence aborted."
-						read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
+						tui_read fakeKey "Press [Enter] key to continue..."
 					fi
 					;;
 				c|"")
@@ -672,7 +765,7 @@ do
 					;;
 				*)
 					echo "❌ Invalid choice option selected."
-					read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
+					tui_read fakeKey "Press [Enter] key to continue..."
 					;;
 			esac
 			done
@@ -718,13 +811,13 @@ do
 			echo "👉 Press [Enter] to return or [x] to exit straight to desktop"
 			echo ""
 			
-			read -p "Select drive to image (e.g., sda): " drive_choice
+			tui_read drive_choice "Select drive to image (e.g., sda): "
 			if [ "$drive_choice" == "x" ] || [ "$drive_choice" == "X" ]; then escape_to_desktop; continue; fi
 			if [ -z "$drive_choice" ]; then continue; fi
 			
 			if ! is_disk_name "$drive_choice" || [ ! -b "/dev/$drive_choice" ]; then
 				echo "❌ Error: Device '/dev/$drive_choice' is not a valid block device."
-				read -p "Press [Enter] key to continue..." fakeKey
+				tui_read fakeKey "Press [Enter] key to continue..."
 				continue
 			fi
 
@@ -732,13 +825,13 @@ do
 			SRC_SIZE_BYTES=$(blockdev --getsize64 "$SRC_PATH")
 			SRC_SIZE_GB=$(echo "scale=2; $SRC_SIZE_BYTES / 1024 / 1024 / 1024" | bc)
 
-			read -p "Enter DESTINATION drive or path (or [x] to exit straight to desktop): " dest_choice
+			tui_read dest_choice "Enter DESTINATION drive or path (or [x] to exit straight to desktop): "
 			if [ "$dest_choice" == "x" ] || [ "$dest_choice" == "X" ]; then escape_to_desktop; continue; fi
 			if [ -z "$dest_choice" ]; then continue; fi
 			
 			if [[ "$dest_choice" == *"$drive_choice"* ]]; then
 				echo "⛔ CRITICAL ERROR: Destination cannot match or reside on source hardware!"
-				read -p "Press [Enter] key to continue..." fakeKey
+				tui_read fakeKey "Press [Enter] key to continue..."
 				continue
 			fi
 
@@ -753,7 +846,7 @@ do
 
 				if (( $(echo "$DEST_SIZE_BYTES < $SRC_SIZE_BYTES" | bc -l) )); then
 					echo "⚠️ WARNING: Target drive is SMALLER than source hardware."
-					read -p "Force proceed anyway? [y/n]: " force_choice
+					tui_read force_choice "Force proceed anyway? [y/n]: "
 					if [[ "$force_choice" != "y" && "$force_choice" != "Y" ]]; then continue; fi
 				fi
 			elif allowed_clone_dir "$dest_choice"; then
@@ -761,7 +854,7 @@ do
 			else
 				echo "❌ Error: Destination must be another disk (e.g. sdb) or a folder"
 				echo "   under /mnt, /media, /root, or /home."
-				read -p "Press [Enter] key to continue..." fakeKey
+				tui_read fakeKey "Press [Enter] key to continue..."
 				continue
 			fi
 
@@ -770,7 +863,7 @@ do
 			echo "   SOURCE:      $SRC_PATH ($SRC_SIZE_GB GB)"
 			echo "   DESTINATION: $DEST_PATH"
 			echo "--------------------------------------------------"
-			read -p "Commit to hardware migration? [y/n]: " final_lock
+			tui_read final_lock "Commit to hardware migration? [y/n]: "
 
 			if [[ "$final_lock" == "y" || "$final_lock" == "Y" ]]; then
 				echo "🚀 Deploying cloning stream via ddrescue..."
@@ -784,7 +877,7 @@ do
 			else
 				echo "❌ Migration execution cancelled."
 			fi
-			read -p "Press [Enter] key to continue..." fakeKey
+			tui_read fakeKey "Press [Enter] key to continue..."
 			;;
 		3)
 			echo "🚨 Timeshift System Restoration"
@@ -792,19 +885,19 @@ do
 			SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
 
 			if [ ! -z "$SYSTEM_SNAP_ID" ]; then
-				read -p "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): " quick_choice
+				tui_read quick_choice "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): "
 				if [ "$quick_choice" == "x" ] || [ "$quick_choice" == "X" ]; then escape_to_desktop; continue; fi
 				if [ "$quick_choice" == "y" ] || [ "$quick_choice" == "Y" ]; then
 					echo "🚀 Initiating instant rollback to snapshot $SYSTEM_SNAP_ID..."
 					sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
-					read -p "Press [Enter] key to continue..." fakeKey
+					tui_read fakeKey "Press [Enter] key to continue..."
 					continue
 				fi
 			fi
 
 			echo "📋 Opening full snapshot selection wizard..."
 			sudo timeshift --restore
-			read -p "Press [Enter] key to continue..." fakeKey
+			tui_read fakeKey "Press [Enter] key to continue..."
 			;;
 		4)
 			clear
@@ -827,7 +920,7 @@ do
 			echo "-------------------------------------------------------------------------"
 			echo ""
 			echo "👉 Press [Enter] to return or [x] to exit straight to desktop"
-			read -p "Enter command: " diagnostic_exit
+			tui_read diagnostic_exit "Enter command: "
 			if [[ "$diagnostic_exit" == "x" || "$diagnostic_exit" == "X" ]]; then
 				escape_to_desktop
 			fi
@@ -853,7 +946,7 @@ do
 			;;
 		u|uninstall|U|UNINSTALL)
 			echo "⚠️  Initiating built-in system uninstallation sequence..."
-			read -p "Are you absolutely sure you want to delete Project Anthony? [y/n]: " confirm_ui_wipe
+			tui_read confirm_ui_wipe "Are you absolutely sure you want to delete Project Anthony? [y/n]: "
 			if [[ "$confirm_ui_wipe" == "y" || "$confirm_ui_wipe" == "Y" ]]; then
 				execute_system_teardown
 			else
@@ -863,7 +956,7 @@ do
 			;;
 		*)
 			echo "❌ Invalid option or utility command. Please try again."
-			read -p "Press [Enter] key to continue..." fakeKey
+			tui_read fakeKey "Press [Enter] key to continue..."
 			;;
 	esac
 done

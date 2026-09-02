@@ -112,7 +112,11 @@ SYSTEM ALTERATIONS MADE:
 SECURITY NOTE:
   TTY3 still runs as root so a frozen machine can be recovered, but the
   menu and crash-restore prompt stay locked until a local account
-  password is accepted (your desktop user by default). There is no root
+  password is accepted (your desktop user by default). After unlock,
+  60 seconds idle at a prompt relocks the console. Failed unlocks wait
+  10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
+  fifth failed attempt force-shuts the machine down. The count stays
+  in /run and clears on reboot. There is no root
   shell. The TUI does not install packages, and disk clones only go to
   another disk or a folder under /mnt, /media, /root, or /home.
   Type 'desktop' at the user prompt to leave without unlocking.
