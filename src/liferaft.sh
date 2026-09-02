@@ -212,256 +212,9 @@ verify_local_password() {
     printf '%s\n' "$pass" | "$helper" "$user" >/dev/null 2>&1
 }
 
-U2F_MAP_FILE="/etc/project-anthony/u2f_mappings"
-
-pam_u2f_available() {
-    ls /lib/*/security/pam_u2f.so /usr/lib/*/security/pam_u2f.so >/dev/null 2>&1
-}
-
-user_has_u2f() {
-    local u="$1"
-    [ -s "$U2F_MAP_FILE" ] || return 1
-    awk -F: -v u="$u" 'NF && $1==u {found=1} END{exit !found}' "$U2F_MAP_FILE"
-}
-
-# Optional second factor. No-op unless this account was enrolled independently.
-verify_security_key() {
-    local user="$1" helper rc
-    user_has_u2f "$user" || return 0
-    if ! pam_u2f_available; then
-        echo ""
-        echo " This account requires a security key, but libpam-u2f is not installed."
-        return 1
-    fi
-    helper="/usr/local/bin/project-anthony-auth"
-    [ -x "$helper" ] || helper="$(command -v project-anthony-auth 2>/dev/null || true)"
-    [ -n "$helper" ] && [ -x "$helper" ] || return 1
-    echo ""
-    echo " Touch your security key..."
-    if command -v timeout >/dev/null; then
-        timeout 45 "$helper" --u2f "$user"
-        rc=$?
-        [ "$rc" -eq 0 ] && return 0
-        [ "$rc" -eq 124 ] && echo " Security key timed out."
-        return 1
-    fi
-    "$helper" --u2f "$user"
-}
-
-IDLE_SECS=60
-FAIL_FILE="/run/project-anthony-auth-fails"
-
-session_idle_lock() {
-    echo ""
-    echo " Session timed out after ${IDLE_SECS}s idle. Unlock again."
-    sleep 2
-    exit 0
-}
-
-# TTY3 menu/crash prompts. Idle timeout relocks (systemd restarts a locked TUI).
-# Long jobs (ddrescue, timeshift, less) are not wrapped.
-tui_read() {
-    local silent=0 dest prompt
-    [ "${1:-}" = "-s" ] && { silent=1; shift; }
-    dest="$1"
-    prompt="${2-}"
-    if [ "${ON_KERNEL_VT:-0}" -ne 1 ]; then
-        if [ "$silent" -eq 1 ]; then
-            IFS= read -r -s -p "$prompt" "$dest" </dev/tty || true
-        else
-            IFS= read -r -p "$prompt" "$dest" </dev/tty || true
-        fi
-        return 0
-    fi
-    if [ "$silent" -eq 1 ]; then
-        IFS= read -r -s -t "$IDLE_SECS" -p "$prompt" "$dest" </dev/tty || session_idle_lock
-    else
-        IFS= read -r -t "$IDLE_SECS" -p "$prompt" "$dest" </dev/tty || session_idle_lock
-    fi
-}
-
-load_auth_fails() {
-    local n=""
-    [ -f "$FAIL_FILE" ] && n=$(tr -cd '0-9' < "$FAIL_FILE" | head -c 8)
-    [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    [ "$n" -gt 15 ] && n=15
-    printf '%s\n' "$n"
-}
-
-save_auth_fails() {
-    umask 077
-    printf '%s\n' "$1" > "$FAIL_FILE"
-    chmod 600 "$FAIL_FILE" 2>/dev/null || true
-}
-
-clear_auth_fails() {
-    rm -f "$FAIL_FILE"
-}
-
-AUTH_LOCKOUT=5
-AUTH_TOKEN_BYPASS=0
-TOKEN_NAME="project-anthony.rescue"
-TOKEN_HASH_FILE="/etc/project-anthony/rescue-token.sha256"
-USB_CHECK_MNT="/run/project-anthony-usbcheck"
-
-rescue_token_registered() {
-    [ -s "$TOKEN_HASH_FILE" ]
-}
-
-expected_token_hash() {
-    tr -d ' \t\r\n' < "$TOKEN_HASH_FILE" 2>/dev/null | tr 'A-F' 'a-f'
-}
-
-token_file_matches() {
-    local got want raw
-    [ -f "$1" ] && [ -r "$1" ] || return 1
-    raw=$(tr -d ' \t\r\n' < "$1" 2>/dev/null)
-    [ "${#raw}" -ge 32 ] || return 1
-    got=$(printf '%s' "$raw" | sha256sum | awk '{print $1}')
-    want=$(expected_token_hash)
-    [ -n "$got" ] && [ -n "$want" ] && [ "$got" = "$want" ]
-}
-
-block_usb_or_removable() {
-    local dev="$1" rm="" tran="" pk=""
-    [ -b "$dev" ] || return 1
-    rm=$(lsblk -dn -o RM "$dev" 2>/dev/null | head -n1 | tr -d ' ')
-    tran=$(lsblk -dn -o TRAN "$dev" 2>/dev/null | head -n1 | tr -d ' ')
-    if [ -z "$tran" ]; then
-        pk=$(lsblk -dn -o PKNAME "$dev" 2>/dev/null | head -n1 | tr -d ' ')
-        if [ -n "$pk" ]; then
-            tran=$(lsblk -dn -o TRAN "/dev/$pk" 2>/dev/null | head -n1 | tr -d ' ')
-            [ -n "$rm" ] || rm=$(lsblk -dn -o RM "/dev/$pk" 2>/dev/null | head -n1 | tr -d ' ')
-        fi
-    fi
-    [ "$rm" = "1" ] || [ "$tran" = "usb" ]
-}
-
-fstype_token_ok() {
-    case "$1" in
-        vfat|fat|fat32|msdos|exfat|ntfs|ntfs3|ext2|ext3|ext4|btrfs|xfs|udf|iso9660|f2fs) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-mountpoint_is_removable() {
-    local mp="$1" src=""
-    src=$(findmnt -nro SOURCE "$mp" 2>/dev/null)
-    [ -n "$src" ] || return 1
-    block_usb_or_removable "$src"
-}
-
-scan_mounted_for_token() {
-    local mp
-    while IFS= read -r mp; do
-        case "$mp" in
-            /media/*|/mnt/*|/run/media/*)
-                if mountpoint_is_removable "$mp" && token_file_matches "${mp%/}/$TOKEN_NAME"; then
-                    return 0
-                fi
-                ;;
-        esac
-    done < <(findmnt -rn -o TARGET 2>/dev/null)
-    return 1
-}
-
-unmount_token_check() {
-    findmnt -n "$USB_CHECK_MNT" >/dev/null 2>&1 && umount -l "$USB_CHECK_MNT" 2>/dev/null || true
-}
-
-scan_unmounted_usb_for_token() {
-    local name typ fs src_root
-    src_root=$(findmnt -nro SOURCE / 2>/dev/null)
-    unmount_token_check
-    mkdir -p "$USB_CHECK_MNT"
-    while IFS= read -r name; do
-        [ -b "$name" ] || continue
-        [ "$name" = "$src_root" ] && continue
-        typ=$(lsblk -dn -o TYPE "$name" 2>/dev/null | head -n1 | tr -d ' ')
-        fs=$(lsblk -dn -o FSTYPE "$name" 2>/dev/null | head -n1 | tr -d ' ')
-        [ "$typ" = "part" ] || { [ "$typ" = "disk" ] && [ -n "$fs" ]; } || continue
-        fstype_token_ok "$fs" || continue
-        block_usb_or_removable "$name" || continue
-        findmnt -n "$name" >/dev/null 2>&1 && continue
-        if mount -o ro,nosuid,nodev,noexec "$name" "$USB_CHECK_MNT" 2>/dev/null; then
-            if token_file_matches "$USB_CHECK_MNT/$TOKEN_NAME"; then
-                unmount_token_check
-                return 0
-            fi
-            unmount_token_check
-        fi
-    done < <(lsblk -nr -p -o NAME 2>/dev/null)
-    unmount_token_check
-    return 1
-}
-
-find_rescue_token() {
-    rescue_token_registered || return 1
-    scan_mounted_for_token && return 0
-    scan_unmounted_usb_for_token
-}
-
-# Fifth failed password: stop taking passwords. Stay locked until a
-# registered rescue USB is inserted. Reboot also clears the fail count.
-wait_for_lockout_key() {
-    echo ""
-    echo " Five failed unlock attempts. Console locked."
-    if rescue_token_registered; then
-        echo " Insert the rescue USB to unlock. Reboot also starts over."
-    else
-        echo " No rescue USB is registered. Reboot to try passwords again."
-    fi
-    while true; do
-        if find_rescue_token; then
-            echo " Rescue USB accepted."
-            clear_auth_fails
-            sleep 1
-            return 0
-        fi
-        sleep 2
-    done
-}
-
-note_auth_failure() {
-    AUTH_TOKEN_BYPASS=0
-    fails=$((fails + 1))
-    [ "$fails" -gt 15 ] && fails=15
-    save_auth_fails "$fails"
-    echo ""
-    echo " Authentication failed. (${fails}/${AUTH_LOCKOUT})"
-    if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
-        wait_for_lockout_key
-        AUTH_TOKEN_BYPASS=1
-        fails=0
-        return 0
-    fi
-    auth_fail_wait "$fails"
-}
-
-# 1–2: 10s. 3: 60s. 4: 3min. 5: lock until rescue USB (or reboot). Count lives in /run.
-auth_fail_wait() {
-    local fails="$1" delay=0
-    case "$fails" in
-        1|2) delay=10 ;;
-        3) delay=60 ;;
-        4) delay=180 ;;
-        *) return 0 ;;
-    esac
-    echo " Waiting ${delay}s before next attempt..."
-    sleep "$delay"
-}
-
 require_console_auth() {
-    local default_user typed user pass fails
-    fails=$(load_auth_fails)
+    local default_user typed user pass fails=0
     default_user=$(default_unlock_user)
-    if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
-        wait_for_lockout_key
-        return 0
-    fi
-    if [ "$fails" -ge 1 ] && [ "$fails" -lt "$AUTH_LOCKOUT" ]; then
-        auth_fail_wait "$fails"
-    fi
     while true; do
         clear
         echo "========================================================="
@@ -480,9 +233,7 @@ require_console_auth() {
             echo " User (or 'desktop' to leave):"
         fi
         typed=""
-        if ! IFS= read -r -t "$IDLE_SECS" -p " " typed </dev/tty; then
-            continue
-        fi
+        IFS= read -r -p " " typed </dev/tty || true
         if [ -z "$typed" ]; then
             user="$default_user"
         else
@@ -493,39 +244,29 @@ require_console_auth() {
             exit 0
         fi
         if ! unlock_account_ok "$user"; then
-            note_auth_failure
-            [ "$AUTH_TOKEN_BYPASS" = 1 ] && return 0
-            continue
-        fi
-        echo ""
-        if user_has_u2f "$user"; then
-            echo " This account also requires a security key after the password."
-        fi
-        echo ""
-        pass=""
-        if ! IFS= read -r -s -t "$IDLE_SECS" -p " Password: " pass </dev/tty; then
             echo ""
+            echo " Authentication failed."
+            fails=$((fails + 1))
+            sleep $((fails >= 5 ? 8 : 2))
             continue
         fi
+        echo ""
+        IFS= read -r -s -p " Password: " pass </dev/tty || true
         echo ""
         if [ -n "$pass" ] && verify_local_password "$user" "$pass"; then
             pass=""
             unset pass
-            if ! verify_security_key "$user"; then
-                note_auth_failure
-                [ "$AUTH_TOKEN_BYPASS" = 1 ] && return 0
-                continue
-            fi
-            clear_auth_fails
             echo ""
-            echo "✔ Console unlocked. Idle lock in ${IDLE_SECS}s."
+            echo "✔ Console unlocked."
             sleep 1
             return 0
         fi
         pass=""
         unset pass
-        note_auth_failure
-        [ "$AUTH_TOKEN_BYPASS" = 1 ] && return 0
+        echo ""
+        echo " Authentication failed."
+        fails=$((fails + 1))
+        sleep $((fails >= 5 ? 8 : 2))
     done
 }
 
@@ -546,7 +287,7 @@ execute_system_teardown() {
     echo "🐕 Stopping crash watchdog..."
     systemctl stop project-anthony-monitor.service 2>/dev/null || true
     systemctl disable project-anthony-monitor.service 2>/dev/null || true
-    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor /run/project-anthony-auth-fails
+    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor
     if [ -z "${DPKG_MAINTSCRIPT_PACKAGE:-}" ]; then
         rm -f /etc/systemd/system/project-anthony-monitor.service
         rm -f /usr/local/bin/project-anthony-monitor
@@ -582,16 +323,13 @@ execute_system_teardown() {
     rm -rf /etc/systemd/system/getty@tty3.service.d
     rm -f /etc/xdg/autostart/project-anthony-hotkeys.desktop
     rm -f /etc/xdg/autostart/project-anthony-first-run.desktop
-    rm -rf /etc/project-anthony
     if [ -z "${DPKG_MAINTSCRIPT_PACKAGE:-}" ]; then
         rm -f /etc/systemd/system/project-anthony-tty.service
         rm -f /usr/local/bin/project-anthony-tty
         rm -f /usr/local/bin/project-anthony-bind-hotkeys
         rm -f /usr/local/bin/project-anthony-show-manual
         rm -f /usr/local/bin/project-anthony-auth
-        rm -f /usr/local/bin/project-anthony-mk-token
         rm -f /etc/pam.d/project-anthony
-        rm -f /etc/pam.d/project-anthony-u2f
         rm -f /usr/share/applications/project-anthony.desktop
         rm -f /usr/share/applications/project-anthony-manual.desktop
         rm -f /usr/share/doc/project-anthony/README.txt
@@ -724,7 +462,7 @@ crash_recovery_prompt() {
     echo "Would you like to restore from backup? [y/n]"
     echo "---------------------------------------------------------"
     echo ""
-    tui_read crash_choice "Enter choice [y/n]: "
+    read -p "Enter choice [y/n]: " crash_choice
     echo ""
 
     if [[ "$crash_choice" == "y" || "$crash_choice" == "Y" ]]; then
@@ -737,11 +475,11 @@ crash_recovery_prompt() {
             echo "Opening the full Timeshift restore wizard instead..."
             sudo timeshift --restore
         fi
-        tui_read fakeKey "Press [Enter] to continue..."
+        read -p "Press [Enter] to continue..." fakeKey
         return 0
     fi
 
-    tui_read desk_choice "Would you like to return to the desktop? [y/n]: "
+    read -p "Would you like to return to the desktop? [y/n]: " desk_choice
     echo ""
     if [[ "$desk_choice" == "y" || "$desk_choice" == "Y" ]]; then
         escape_to_desktop
@@ -851,7 +589,7 @@ do
 	echo "=========================================="
 	echo " Access: Ctrl+Alt+X (desktop)  |  Ctrl+Alt+F3 (frozen)  |  Alt+SysRq+R then F3 (stuck keyboard)"
 	echo "=========================================="
-	tui_read choice "Enter choice: "
+	read -p "Enter choice: " choice
 
 	case $choice in
 		1)
@@ -880,7 +618,7 @@ do
 			echo " c) Return to Main Menu"
 			echo " x) EMERGENCY: Exit straight to desktop"
 			echo "-------------------------------------------"
-			tui_read desktop_choice "Enter choice [a-x]: "
+			read -r -p "Enter choice [a-x]: " desktop_choice </dev/tty
 			echo ""
 
 			case $desktop_choice in
@@ -913,17 +651,17 @@ do
 					else
 						echo "⛔ Action blocked! Soft-replacing a compositor on Wayland will crash your session."
 					fi
-					tui_read fakeKey "Press [Enter] key to continue..."
+					read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
 					;;
 				b)
 					echo "⚠️ WARNING: This action will instantly force-close all open applications!"
-					tui_read confirm_reset "Are you sure you want to completely reload LightDM? [y/n]: "
+					read -r -p "Are you sure you want to completely reload LightDM? [y/n]: " confirm_reset </dev/tty
 					if [ "$confirm_reset" == "y" ] || [ "$confirm_reset" == "Y" ]; then
 						echo "🚀 Restarting LightDM Display Manager..."
 						sudo systemctl restart display-manager
 					else
 						echo "❌ Reset sequence aborted."
-						tui_read fakeKey "Press [Enter] key to continue..."
+						read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
 					fi
 					;;
 				c|"")
@@ -934,7 +672,7 @@ do
 					;;
 				*)
 					echo "❌ Invalid choice option selected."
-					tui_read fakeKey "Press [Enter] key to continue..."
+					read -r -p "Press [Enter] key to continue..." fakeKey </dev/tty
 					;;
 			esac
 			done
@@ -980,13 +718,13 @@ do
 			echo "👉 Press [Enter] to return or [x] to exit straight to desktop"
 			echo ""
 			
-			tui_read drive_choice "Select drive to image (e.g., sda): "
+			read -p "Select drive to image (e.g., sda): " drive_choice
 			if [ "$drive_choice" == "x" ] || [ "$drive_choice" == "X" ]; then escape_to_desktop; continue; fi
 			if [ -z "$drive_choice" ]; then continue; fi
 			
 			if ! is_disk_name "$drive_choice" || [ ! -b "/dev/$drive_choice" ]; then
 				echo "❌ Error: Device '/dev/$drive_choice' is not a valid block device."
-				tui_read fakeKey "Press [Enter] key to continue..."
+				read -p "Press [Enter] key to continue..." fakeKey
 				continue
 			fi
 
@@ -994,13 +732,13 @@ do
 			SRC_SIZE_BYTES=$(blockdev --getsize64 "$SRC_PATH")
 			SRC_SIZE_GB=$(echo "scale=2; $SRC_SIZE_BYTES / 1024 / 1024 / 1024" | bc)
 
-			tui_read dest_choice "Enter DESTINATION drive or path (or [x] to exit straight to desktop): "
+			read -p "Enter DESTINATION drive or path (or [x] to exit straight to desktop): " dest_choice
 			if [ "$dest_choice" == "x" ] || [ "$dest_choice" == "X" ]; then escape_to_desktop; continue; fi
 			if [ -z "$dest_choice" ]; then continue; fi
 			
 			if [[ "$dest_choice" == *"$drive_choice"* ]]; then
 				echo "⛔ CRITICAL ERROR: Destination cannot match or reside on source hardware!"
-				tui_read fakeKey "Press [Enter] key to continue..."
+				read -p "Press [Enter] key to continue..." fakeKey
 				continue
 			fi
 
@@ -1015,7 +753,7 @@ do
 
 				if (( $(echo "$DEST_SIZE_BYTES < $SRC_SIZE_BYTES" | bc -l) )); then
 					echo "⚠️ WARNING: Target drive is SMALLER than source hardware."
-					tui_read force_choice "Force proceed anyway? [y/n]: "
+					read -p "Force proceed anyway? [y/n]: " force_choice
 					if [[ "$force_choice" != "y" && "$force_choice" != "Y" ]]; then continue; fi
 				fi
 			elif allowed_clone_dir "$dest_choice"; then
@@ -1023,7 +761,7 @@ do
 			else
 				echo "❌ Error: Destination must be another disk (e.g. sdb) or a folder"
 				echo "   under /mnt, /media, /root, or /home."
-				tui_read fakeKey "Press [Enter] key to continue..."
+				read -p "Press [Enter] key to continue..." fakeKey
 				continue
 			fi
 
@@ -1032,7 +770,7 @@ do
 			echo "   SOURCE:      $SRC_PATH ($SRC_SIZE_GB GB)"
 			echo "   DESTINATION: $DEST_PATH"
 			echo "--------------------------------------------------"
-			tui_read final_lock "Commit to hardware migration? [y/n]: "
+			read -p "Commit to hardware migration? [y/n]: " final_lock
 
 			if [[ "$final_lock" == "y" || "$final_lock" == "Y" ]]; then
 				echo "🚀 Deploying cloning stream via ddrescue..."
@@ -1046,7 +784,7 @@ do
 			else
 				echo "❌ Migration execution cancelled."
 			fi
-			tui_read fakeKey "Press [Enter] key to continue..."
+			read -p "Press [Enter] key to continue..." fakeKey
 			;;
 		3)
 			echo "🚨 Timeshift System Restoration"
@@ -1054,19 +792,19 @@ do
 			SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
 
 			if [ ! -z "$SYSTEM_SNAP_ID" ]; then
-				tui_read quick_choice "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): "
+				read -p "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): " quick_choice
 				if [ "$quick_choice" == "x" ] || [ "$quick_choice" == "X" ]; then escape_to_desktop; continue; fi
 				if [ "$quick_choice" == "y" ] || [ "$quick_choice" == "Y" ]; then
 					echo "🚀 Initiating instant rollback to snapshot $SYSTEM_SNAP_ID..."
 					sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
-					tui_read fakeKey "Press [Enter] key to continue..."
+					read -p "Press [Enter] key to continue..." fakeKey
 					continue
 				fi
 			fi
 
 			echo "📋 Opening full snapshot selection wizard..."
 			sudo timeshift --restore
-			tui_read fakeKey "Press [Enter] key to continue..."
+			read -p "Press [Enter] key to continue..." fakeKey
 			;;
 		4)
 			clear
@@ -1089,7 +827,7 @@ do
 			echo "-------------------------------------------------------------------------"
 			echo ""
 			echo "👉 Press [Enter] to return or [x] to exit straight to desktop"
-			tui_read diagnostic_exit "Enter command: "
+			read -p "Enter command: " diagnostic_exit
 			if [[ "$diagnostic_exit" == "x" || "$diagnostic_exit" == "X" ]]; then
 				escape_to_desktop
 			fi
@@ -1115,7 +853,7 @@ do
 			;;
 		u|uninstall|U|UNINSTALL)
 			echo "⚠️  Initiating built-in system uninstallation sequence..."
-			tui_read confirm_ui_wipe "Are you absolutely sure you want to delete Project Anthony? [y/n]: "
+			read -p "Are you absolutely sure you want to delete Project Anthony? [y/n]: " confirm_ui_wipe
 			if [[ "$confirm_ui_wipe" == "y" || "$confirm_ui_wipe" == "Y" ]]; then
 				execute_system_teardown
 			else
@@ -1125,7 +863,7 @@ do
 			;;
 		*)
 			echo "❌ Invalid option or utility command. Please try again."
-			tui_read fakeKey "Press [Enter] key to continue..."
+			read -p "Press [Enter] key to continue..." fakeKey
 			;;
 	esac
 done

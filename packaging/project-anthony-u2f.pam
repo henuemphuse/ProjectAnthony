@@ -1,5 +1,0 @@
-#%PAM-1.0
-# Optional FIDO2/U2F for TTY3. Invoked only when a mapping file exists.
-# Password stays in project-anthony (pam_unix). Do not @include common-auth.
-auth     required       pam_u2f.so cue authfile=/etc/project-anthony/u2f_mappings
-account  required       pam_permit.so

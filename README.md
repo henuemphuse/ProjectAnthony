@@ -35,7 +35,6 @@ ProjectAnthony/
 │   ├── project-anthony-auth.c            # PAM password check for TTY3 unlock
 │   ├── project-anthony-auth.py           # Fallback helper if gcc is unavailable
 │   ├── project-anthony-show-manual.sh    # Opens packaged README.txt (install / menu / --manual)
-│   ├── project-anthony-mk-token.sh       # USB rescue token (root CLI only; not in the TUI)
 │   ├── anthony-monitor.sh                  # Lightweight crash watchdog daemon
 │   ├── liferaft-autosnap.sh              # Single-slot Timeshift rolling snapshot
 │   └── README.txt                         # In-app / packaged manual
@@ -46,8 +45,7 @@ ProjectAnthony/
 │   ├── project-anthony-first-run.desktop # Hidden autostart: show manual if dpkg had no GUI
 │   ├── project-anthony.desktop            # Menu + Desktop: "Project Anthony Rescue"
 │   ├── project-anthony-manual.desktop   # Menu + Desktop: "Project Anthony Manual"
-│   ├── project-anthony.pam              # /etc/pam.d/project-anthony (TTY3 password)
-│   └── project-anthony-u2f.pam          # /etc/pam.d/project-anthony-u2f (optional FIDO2)
+│   └── project-anthony.pam              # /etc/pam.d/project-anthony (TTY3 unlock)
 ├── debian/
 │   ├── control                            # Package metadata and Depends
 │   ├── postinst                           # Enable units, bind hotkeys, SysRq, APT hook, open manual
@@ -69,7 +67,6 @@ Runtime paths after `dpkg -i`:
 /usr/local/bin/project-anthony-bind-hotkeys
 /usr/local/bin/project-anthony-show-manual
 /usr/local/bin/project-anthony-auth
-/usr/local/bin/project-anthony-mk-token
 /usr/local/bin/liferaft-autosnap.sh
 /lib/systemd/system/project-anthony-tty.service
 /lib/systemd/system/project-anthony-monitor.service
@@ -83,9 +80,6 @@ Runtime paths after `dpkg -i`:
 /etc/apt/apt.conf.d/99-liferaft-autosnap    ← written by postinst
 /etc/sysctl.d/99-project-anthony-sysrq.conf ← written by postinst
 /etc/pam.d/project-anthony                  ← TTY3 password unlock
-/etc/pam.d/project-anthony-u2f              ← optional FIDO2/U2F (only used if enrolled)
-/etc/project-anthony/rescue-token.sha256    ← optional USB token hash (created by mk-token)
-/etc/project-anthony/u2f_mappings           ← optional FIDO2 mappings (created by --u2f)
 ```
 
 Recovery is two independent entry points, not one program on both layers:
@@ -155,7 +149,7 @@ sudo apt remove project-anthony
 
 ## ⚠️ Security Note
 
-TTY3 still runs as root so a frozen machine can be recovered, but the rescue menu and crash-restore prompt stay locked until a local account password is accepted (your desktop user by default). After unlock, 60 seconds of idle at a prompt relocks the console (password required again). Failed unlocks wait 10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the fifth failed attempt locks the console until a registered rescue USB is inserted (reboot also clears the count in `/run`). Create that USB from a working desktop with `sudo project-anthony-mk-token /media/YOU/USBNAME` — it is not in the rescue menu. The machine stores only a SHA-256 of `project-anthony.rescue`; `--revoke` invalidates every copy. FIDO2/U2F is optional and off until you install `libpam-u2f` and run `sudo project-anthony-mk-token --u2f` (or `--u2f-import`); enrolled accounts then touch a registered key after the password. Repeat `--u2f alice` / `--u2f bob` for a shared workstation, or the same username again for a spare key. `--u2f-disable` turns it off. There is no root shell. The TUI will not install packages, will not let `less` spawn a shell, and will only clone to another disk or a folder under `/mnt`, `/media`, `/root`, or `/home`. Type `desktop` at the user prompt to leave without unlocking. Returning to the desktop ends that unlock; the next F3 asks again. Magic SysRq is limited to keyboard unraw (`kernel.sysrq = 16`). `Ctrl+Alt+X` on a living desktop still runs as your user and uses sudo for privileged tools. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty via `project-anthony-bind-hotkeys --unbind`.
+TTY3 still runs as root so a frozen machine can be recovered, but the rescue menu and crash-restore prompt stay locked until a local account password is accepted (your desktop user by default). There is no root shell. The TUI will not install packages, will not let `less` spawn a shell, and will only clone to another disk or a folder under `/mnt`, `/media`, `/root`, or `/home`. Type `desktop` at the user prompt to leave without unlocking. Returning to the desktop ends that unlock; the next F3 asks again. Magic SysRq is limited to keyboard unraw (`kernel.sysrq = 16`). `Ctrl+Alt+X` on a living desktop still runs as your user and uses sudo for privileged tools. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty via `project-anthony-bind-hotkeys --unbind`.
 
 ---
 

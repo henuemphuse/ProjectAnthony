@@ -23,7 +23,6 @@ install_auth_helper() {
     local dest_pam="/etc/pam.d/project-anthony"
     local pamlib=""
     cp -f "$INSTALL_ROOT/packaging/project-anthony.pam" "$dest_pam"
-    cp -f "$INSTALL_ROOT/packaging/project-anthony-u2f.pam" /etc/pam.d/project-anthony-u2f
     pamlib=$(ls /lib/*/libpam.so.0 /usr/lib/*/libpam.so.0 2>/dev/null | head -n1)
     if command -v gcc >/dev/null && [ -n "$pamlib" ] && \
         gcc -O2 -s -o "$dest_bin" "$SRC_DIR/project-anthony-auth.c" "$pamlib" 2>/dev/null; then
@@ -33,7 +32,7 @@ install_auth_helper() {
         echo "✔ Installed PAM console-unlock helper (python fallback)."
     fi
     chmod 700 "$dest_bin"
-    chmod 644 "$dest_pam" /etc/pam.d/project-anthony-u2f
+    chmod 644 "$dest_pam"
 }
 
 echo "=================================================="
@@ -99,10 +98,8 @@ cp -f "$INSTALL_ROOT/src/anthony-monitor.sh" /usr/local/bin/project-anthony-moni
 cp -f "$INSTALL_ROOT/src/project-anthony-tty.sh" /usr/local/bin/project-anthony-tty
 cp -f "$INSTALL_ROOT/src/project-anthony-bind-hotkeys.sh" /usr/local/bin/project-anthony-bind-hotkeys
 cp -f "$INSTALL_ROOT/src/project-anthony-show-manual.sh" /usr/local/bin/project-anthony-show-manual
-cp -f "$INSTALL_ROOT/src/project-anthony-mk-token.sh" /usr/local/bin/project-anthony-mk-token
 chmod +x /usr/local/bin/project-anthony-monitor /usr/local/bin/project-anthony-tty \
-    /usr/local/bin/project-anthony-bind-hotkeys /usr/local/bin/project-anthony-show-manual \
-    /usr/local/bin/project-anthony-mk-token
+    /usr/local/bin/project-anthony-bind-hotkeys /usr/local/bin/project-anthony-show-manual
 install_auth_helper
 cp -f "$INSTALL_ROOT/packaging/project-anthony-monitor.service" /etc/systemd/system/project-anthony-monitor.service
 cp -f "$INSTALL_ROOT/packaging/project-anthony-tty.service" /etc/systemd/system/project-anthony-tty.service

@@ -9,10 +9,8 @@ chmod +x /usr/local/bin/liferaft-autosnap.sh \
     /usr/local/bin/project-anthony-monitor \
     /usr/local/bin/project-anthony-tty \
     /usr/local/bin/project-anthony-bind-hotkeys \
-    /usr/local/bin/project-anthony-show-manual \
-    /usr/local/bin/project-anthony-mk-token
+    /usr/local/bin/project-anthony-show-manual
 chmod 700 /usr/local/bin/project-anthony-auth
-chmod 644 /etc/pam.d/project-anthony /etc/pam.d/project-anthony-u2f
 echo "DPkg::Pre-Install-Pkgs { \"/usr/local/bin/liferaft-autosnap.sh\"; };" > /etc/apt/apt.conf.d/99-liferaft-autosnap
 
 # Timeshift: rsync bootstrap only when the machine has no existing setup.
