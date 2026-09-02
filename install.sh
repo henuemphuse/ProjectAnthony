@@ -31,7 +31,7 @@ install_auth_helper() {
         cp -f "$SRC_DIR/project-anthony-auth.py" "$dest_bin"
         echo "✔ Installed PAM console-unlock helper (python fallback)."
     fi
-    chmod 755 "$dest_bin"
+    chmod 700 "$dest_bin"
     chmod 644 "$dest_pam"
 }
 

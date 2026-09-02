@@ -85,6 +85,7 @@ echo "🚀 Project Anthony: Scanning for old rolling snapshots..."
 
 # Quietly query the system backends for an existing automated signature id string
 OLD_SNAPSHOT_ID=$(timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+[[ "$OLD_SNAPSHOT_ID" =~ ^[0-9A-Za-z._-]+$ ]] || OLD_SNAPSHOT_ID=""
 
 # Redundancy First-Run Safeguard: Only execute the delete loop if an old id actually exists
 if [ ! -z "$OLD_SNAPSHOT_ID" ]; then

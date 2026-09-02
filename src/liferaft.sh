@@ -425,6 +425,13 @@ sanitize_crash_text() {
         | head -n 8
 }
 
+rolling_snapshot_id() {
+    local id
+    id=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+    [[ "$id" =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    printf '%s\n' "$id"
+}
+
 crash_recovery_prompt() {
     local summary="" details=""
     if [ -f "$STATE_FILE" ]; then
@@ -460,7 +467,7 @@ crash_recovery_prompt() {
 
     if [[ "$crash_choice" == "y" || "$crash_choice" == "Y" ]]; then
         echo "🚀 Opening Timeshift restore..."
-        SYSTEM_SNAP_ID=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+        SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
         if [ -n "$SYSTEM_SNAP_ID" ]; then
             sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
         else
@@ -782,7 +789,7 @@ do
 		3)
 			echo "🚨 Timeshift System Restoration"
 			echo "------------------------------------------"
-			SYSTEM_SNAP_ID=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+			SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
 
 			if [ ! -z "$SYSTEM_SNAP_ID" ]; then
 				read -p "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): " quick_choice

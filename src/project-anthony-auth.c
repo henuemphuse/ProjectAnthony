@@ -85,6 +85,10 @@ int main(int argc, char **argv)
 
     if (argc != 2 || argv[1][0] == '\0')
         return 2;
+    /* TTY3 already runs as root. Refuse other callers so this is not a
+     * world-usable, faillock-free password oracle. */
+    if (geteuid() != 0)
+        return 1;
     if (!fgets(buf, (int)sizeof(buf), stdin))
         return 1;
     buf[strcspn(buf, "\n")] = '\0';

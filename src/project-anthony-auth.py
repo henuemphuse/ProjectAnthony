@@ -2,6 +2,7 @@
 """Fallback PAM check when the C helper was not compiled. Same CLI as the C binary."""
 import ctypes
 import ctypes.util
+import os
 import sys
 
 PAM_SUCCESS = 0
@@ -36,6 +37,8 @@ class PamConv(ctypes.Structure):
 
 
 def main() -> int:
+    if os.geteuid() != 0:
+        return 1
     if len(sys.argv) != 2 or not sys.argv[1]:
         return 2
     password = sys.stdin.readline().rstrip("\n")

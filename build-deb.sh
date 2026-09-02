@@ -26,7 +26,7 @@ install_auth_helper() {
     else
         cp -f "$ROOT/src/project-anthony-auth.py" "$dest_bin"
     fi
-    chmod 755 "$dest_bin"
+    chmod 700 "$dest_bin"
     chmod 644 "$dest_pam"
 }
 
@@ -66,8 +66,8 @@ chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony-tty" \
   "$DEST/usr/local/bin/project-anthony-bind-hotkeys" \
   "$DEST/usr/local/bin/liferaft-autosnap.sh" \
-  "$DEST/usr/local/bin/project-anthony-show-manual" \
-  "$DEST/usr/local/bin/project-anthony-auth"
+  "$DEST/usr/local/bin/project-anthony-show-manual"
+chmod 700 "$DEST/usr/local/bin/project-anthony-auth"
 chmod 644 "$DEST/DEBIAN/control" \
   "$DEST/etc/pam.d/project-anthony" \
   "$DEST/usr/share/applications/project-anthony.desktop" \
