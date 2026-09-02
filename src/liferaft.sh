@@ -240,11 +240,15 @@ execute_system_teardown() {
 
     # 6. Restore Cinnamon Ctrl+Alt+Del logout mapping for every desktop user
     echo "⌨️  Step 6: Restoring desktop Ctrl+Alt+Del logout shortcut..."
-    for u in $(desktop_users); do
-        gsettings_as "$u" set org.cinnamon.desktop.keybindings.media-keys logout "['<Control><Alt>Delete']"
-        gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ binding "[]"
-        gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ command "''"
-    done
+    if [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
+        /usr/local/bin/project-anthony-bind-hotkeys --unbind || true
+    else
+        for u in $(desktop_users); do
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.media-keys logout "['<Control><Alt>Delete']"
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ binding "[]"
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ command "''"
+        done
+    fi
     echo "✔ Desktop logout hotkey restored."
 
     # 7. Scrub the TTY3 Shell Trap from root's .bashrc
