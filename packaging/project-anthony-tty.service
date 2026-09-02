@@ -1,0 +1,26 @@
+[Unit]
+Description=Project Anthony rescue TUI on TTY3
+Documentation=file:///usr/share/doc/project-anthony/README.txt
+After=multi-user.target
+Conflicts=getty@tty3.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/project-anthony-tty
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty3
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+Restart=always
+RestartSec=2
+StartLimitIntervalSec=0
+User=root
+WorkingDirectory=/root
+Environment=TERM=linux
+Environment=PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

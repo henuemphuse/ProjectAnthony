@@ -1,0 +1,56 @@
+#!/bin/bash
+# =========================================================================
+#   PROJECT ANTHONY: POST-INSTALLATION MAINTAINER PROFILE HOOK
+# =========================================================================
+
+# 1. APT pre-install snapshot hook (binary is shipped in the package)
+chmod +x /usr/local/bin/liferaft-autosnap.sh \
+    /usr/local/bin/project-anthony \
+    /usr/local/bin/project-anthony-monitor \
+    /usr/local/bin/project-anthony-tty \
+    /usr/local/bin/project-anthony-bind-hotkeys \
+    /usr/local/bin/project-anthony-show-manual
+echo "DPkg::Pre-Install-Pkgs { \"/usr/local/bin/liferaft-autosnap.sh\"; };" > /etc/apt/apt.conf.d/99-liferaft-autosnap
+
+# Timeshift: rsync bootstrap only when the machine has no existing setup.
+# --rsync switches the saved backend, so never run it over a live config.
+if command -v timeshift >/dev/null; then
+    /usr/local/bin/liferaft-autosnap.sh --bootstrap || true
+fi
+
+# 2. Desktop Ctrl+Alt+X → rescue TUI (CAD stays as stock logout)
+echo "⌨️  Binding Cinnamon Ctrl+Alt+X to Project Anthony..."
+/usr/local/bin/project-anthony-bind-hotkeys || true
+echo "✔ Desktop Ctrl+Alt+X opens Project Anthony. Ctrl+Alt+Del remains logout."
+
+# 3. Restore stock systemd Ctrl+Alt+Del (reboot) if an older build overrode it
+rm -f /etc/systemd/system/ctrl-alt-del.target /etc/systemd/system/project-anthony-cad.service
+
+# 4. Dedicated TTY3 service — getty autologin + bashrc was crash-looping
+#    (session opened then immediately closed → start-limit-hit → black VT).
+echo "⚓ Installing TTY3 rescue console service..."
+if [ -f /root/.bashrc ]; then
+    sed -i '/# Project Anthony TTY3 Shell Trap Module/,/fi/d' /root/.bashrc
+fi
+rm -rf /etc/systemd/system/getty@tty3.service.d
+systemctl daemon-reload
+systemctl stop getty@tty3.service >/dev/null 2>&1 || true
+systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
+systemctl mask getty@tty3.service >/dev/null 2>&1 || true
+systemctl enable --now project-anthony-tty.service >/dev/null 2>&1 || true
+
+# 5. Magic SysRq so a hung X grab can still unraw the keyboard
+echo "⌨️  Enabling Magic SysRq keyboard recovery..."
+cat << 'EOF' > /etc/sysctl.d/99-project-anthony-sysrq.conf
+# Project Anthony: allow Magic SysRq so a hung compositor can still unraw the kbd
+kernel.sysrq = 1
+EOF
+sysctl -p /etc/sysctl.d/99-project-anthony-sysrq.conf >/dev/null 2>&1 || true
+
+systemctl daemon-reload
+systemctl enable --now project-anthony-monitor.service 2>/dev/null || true
+
+echo "✔ Project Anthony: Ctrl+Alt+X (desktop), Ctrl+Alt+F3 (TTY3), Alt+SysRq+R (unraw) are armed."
+echo "📄 Menu: Project Anthony Rescue  |  Project Anthony Manual"
+/usr/local/bin/project-anthony-show-manual --from-install || true
+exit 0

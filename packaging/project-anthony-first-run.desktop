@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Project Anthony First-Run Manual
+Comment=Show the Project Anthony manual once after install if dpkg had no desktop session
+Exec=/usr/local/bin/project-anthony-show-manual --first-run
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=4
+NoDisplay=true

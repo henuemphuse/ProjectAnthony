@@ -1,0 +1,12 @@
+Package: project-anthony
+Version: 1.0-1
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Johnny Dalton Bohnenkamp
+Depends: timeshift, gddrescue, bc, smartmontools, lm-sensors, gnome-terminal, kbd
+Description: Indestructible System Control Terminal & Life Raft
+ Project Anthony provides a resilient Text User Interface (TUI).
+ Ctrl+Alt+X opens the rescue TUI over a living desktop session.
+ Ctrl+Alt+F3 is a kernel VT switch onto the TTY3 rescue console
+ when the compositor is frozen. Alt+SysRq+R unraws a grabbed keyboard.

@@ -1,0 +1,10 @@
+# Generated Debian staging tree and package
+build/
+
+# Stray package artifacts
+*.deb
+
+# Editor / OS noise
+*~
+*.swp
+.DS_Store

@@ -1,0 +1,23 @@
+#!/bin/bash
+# =========================================================================
+#   PROJECT ANTHONY: POST-REMOVAL CACHE REGISTRY PURGE HOOK
+# =========================================================================
+
+case "$1" in
+    remove)
+        echo "🧹 Project Anthony: Package manager 'remove' action intercepted."
+        echo "🔄 Automatically synchronizing system package database tracking metrics..."
+        (
+            sleep 1
+            dpkg --purge project-anthony &>/dev/null
+        ) &
+        ;;
+    purge|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

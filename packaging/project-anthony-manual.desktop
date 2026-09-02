@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Project Anthony Manual
+Comment=How Project Anthony works, what it does, and how to open it
+Exec=/usr/local/bin/project-anthony-show-manual
+Icon=help-contents
+Terminal=false
+Categories=System;Documentation;
+Keywords=rescue;timeshift;recovery;manual;hotkey;tty;
+StartupNotify=true

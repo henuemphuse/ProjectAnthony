@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Project Anthony Rescue
+Comment=Rescue TUI — also Ctrl+Alt+X (desktop) or Ctrl+Alt+F3 (frozen desktop)
+Exec=/usr/bin/gnome-terminal --full-screen -- /usr/local/bin/project-anthony --run-core-menu
+Icon=utilities-terminal
+Terminal=false
+Categories=System;Utility;
+Keywords=rescue;timeshift;recovery;liferaft;
+StartupNotify=true

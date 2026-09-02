@@ -1,0 +1,19 @@
+[Unit]
+Description=Project Anthony lightweight crash watchdog
+Documentation=file:///usr/share/doc/project-anthony/README.txt
+After=multi-user.target
+Wants=project-anthony-tty.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/project-anthony-monitor
+Restart=always
+RestartSec=10
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=32M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

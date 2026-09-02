@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Project Anthony Hotkeys
+Comment=Re-apply Ctrl+Alt+X rescue binding in the Cinnamon session
+Exec=/usr/local/bin/project-anthony-bind-hotkeys
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
