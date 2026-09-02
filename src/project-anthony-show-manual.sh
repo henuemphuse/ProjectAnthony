@@ -137,12 +137,12 @@ open_readme_here() {
     case "$opener" in
         gnome-terminal)
             gnome-terminal --title="Project Anthony Manual" --geometry=100x42 -- \
-                bash -c "less -X '$README'; exec bash" >/dev/null 2>&1 &
+                env LESSSECURE=1 less -X -- "$README" >/dev/null 2>&1 &
             disown >/dev/null 2>&1 || true
             ;;
         "")
             if [ -t 1 ]; then
-                less -X "$README"
+                LESSSECURE=1 less -X -- "$README"
                 return 0
             fi
             return 1

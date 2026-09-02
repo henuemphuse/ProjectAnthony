@@ -16,12 +16,27 @@ PKG_NAME="ProjectAnthony_1.0-1_amd64"
 DEST="${1:-"$ROOT/build/$PKG_NAME"}"
 OUT_DEB="$(dirname "$DEST")/${PKG_NAME}.deb"
 
+install_auth_helper() {
+    local dest_bin="$1" dest_pam="$2" pamlib=""
+    mkdir -p "$(dirname "$dest_bin")" "$(dirname "$dest_pam")"
+    cp -f "$ROOT/packaging/project-anthony.pam" "$dest_pam"
+    pamlib=$(ls /lib/*/libpam.so.0 /usr/lib/*/libpam.so.0 2>/dev/null | head -n1 || true)
+    if command -v gcc >/dev/null && [ -n "$pamlib" ]; then
+        gcc -O2 -s -o "$dest_bin" "$ROOT/src/project-anthony-auth.c" "$pamlib"
+    else
+        cp -f "$ROOT/src/project-anthony-auth.py" "$dest_bin"
+    fi
+    chmod 700 "$dest_bin"
+    chmod 644 "$dest_pam"
+}
+
 rm -rf "$DEST"
 mkdir -p "$DEST/DEBIAN" \
   "$DEST/usr/local/bin" \
   "$DEST/usr/share/applications" \
   "$DEST/usr/share/doc/project-anthony" \
   "$DEST/etc/xdg/autostart" \
+  "$DEST/etc/pam.d" \
   "$DEST/lib/systemd/system"
 
 cp -f "$ROOT/debian/control" "$DEST/DEBIAN/control"
@@ -43,6 +58,7 @@ cp -f "$ROOT/packaging/project-anthony-hotkeys.desktop" "$DEST/etc/xdg/autostart
 cp -f "$ROOT/packaging/project-anthony-first-run.desktop" "$DEST/etc/xdg/autostart/project-anthony-first-run.desktop"
 cp -f "$ROOT/packaging/project-anthony-monitor.service" "$DEST/lib/systemd/system/project-anthony-monitor.service"
 cp -f "$ROOT/packaging/project-anthony-tty.service" "$DEST/lib/systemd/system/project-anthony-tty.service"
+install_auth_helper "$DEST/usr/local/bin/project-anthony-auth" "$DEST/etc/pam.d/project-anthony"
 
 chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony" \
@@ -51,7 +67,9 @@ chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony-bind-hotkeys" \
   "$DEST/usr/local/bin/liferaft-autosnap.sh" \
   "$DEST/usr/local/bin/project-anthony-show-manual"
+chmod 700 "$DEST/usr/local/bin/project-anthony-auth"
 chmod 644 "$DEST/DEBIAN/control" \
+  "$DEST/etc/pam.d/project-anthony" \
   "$DEST/usr/share/applications/project-anthony.desktop" \
   "$DEST/usr/share/applications/project-anthony-manual.desktop" \
   "$DEST/etc/xdg/autostart/project-anthony-hotkeys.desktop" \

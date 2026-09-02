@@ -12,6 +12,13 @@ RestartSec=10
 Nice=19
 IOSchedulingClass=idle
 MemoryMax=32M
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=true
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
 StandardOutput=journal
 StandardError=journal
 

@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: Johnny Dalton Bohnenkamp
-Depends: timeshift, gddrescue, bc, smartmontools, lm-sensors, gnome-terminal, kbd
+Depends: timeshift, gddrescue, bc, smartmontools, lm-sensors, gnome-terminal, kbd, libpam0g, python3
 Description: Indestructible System Control Terminal & Life Raft
  Project Anthony provides a resilient Text User Interface (TUI).
  Ctrl+Alt+X opens the rescue TUI over a living desktop session.

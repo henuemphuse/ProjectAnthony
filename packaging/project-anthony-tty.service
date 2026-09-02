@@ -21,6 +21,17 @@ User=root
 WorkingDirectory=/root
 Environment=TERM=linux
 Environment=PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LESSSECURE=1
+Environment=HOME=/root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target

@@ -1,9 +1,11 @@
 #!/bin/bash
-# Rescue TUI on a kernel VT. exec so this process *is* the TUI (and later
-# the shell). "Exit to Open Command Shell" replaces the TUI with bash
-# in-place; systemd Restart=always brings the menu back when that shell
-# exits. --noprofile/--norc so /root/.bashrc cannot relaunch the TUI.
+# Rescue TUI on a kernel VT. exec so this process *is* the TUI. The TUI
+# asks for a local password before the menu or crash prompt. There is no
+# root-shell option; leaving the menu (or returning to the desktop) exits
+# so systemd Restart=always can present a fresh locked prompt.
 export TERM="${TERM:-linux}"
 export PATH="/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 cd /root 2>/dev/null || cd /
+export LESSSECURE=1
+export HOME=/root
 exec /usr/local/bin/project-anthony --run-core-menu

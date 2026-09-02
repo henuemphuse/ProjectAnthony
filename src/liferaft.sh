@@ -148,9 +148,126 @@ escape_to_desktop() {
         loginctl activate "$sid" --no-ask-password 2>/dev/null || true
     fi
     if [ -n "$vt" ] && [ "$vt" != "0" ]; then
-        chvt "$vt" 2>/dev/null && return 0
+        chvt "$vt" 2>/dev/null || true
     fi
+    # Kernel VT: drop this unlocked root session so the next F3 re-prompts.
+    t=$(tty 2>/dev/null || true)
+    if [[ "$t" == /dev/tty[0-9]* ]]; then
+        exit 0
+    fi
+    return 0
+}
+
+# Disk names only (sda, nvme0n1). No slashes, no "..".
+is_disk_name() {
+    [[ "$1" =~ ^[a-zA-Z0-9]+([-_][a-zA-Z0-9]+)*$ ]]
+}
+
+# Image-file destinations: realpath must stay under /mnt, /media, /root, or /home.
+allowed_clone_dir() {
+    local raw="$1" real
+    case "$raw" in
+        *..*) return 1 ;;
+    esac
+    [ -d "$raw" ] || return 1
+    real=$(realpath "$raw" 2>/dev/null) || return 1
+    case "$real" in
+        /mnt|/mnt/*|/media|/media/*|/root|/root/*|/home/*)
+            return 0
+            ;;
+    esac
     return 1
+}
+
+page_manual() {
+    local f="$1"
+    [ -f "$f" ] || return 1
+    # LESSSECURE disables less's ! shell, pipe, and edit escapes.
+    LESSSECURE=1 less -X -- "$f"
+}
+
+# Unlock TTY3 / crash-console once per process. Physical console is already
+# root; this checks a local account password via PAM before any menu action.
+unlock_account_ok() {
+    local user="$1" uid
+    [[ "$user" =~ ^[A-Za-z0-9_.][A-Za-z0-9_.-]*$ ]] || return 1
+    uid=$(id -u "$user" 2>/dev/null) || return 1
+    [ "$uid" -eq 0 ] || { [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; }
+}
+
+default_unlock_user() {
+    probe_graphical_session
+    if [ -n "$GRAPHICAL_USER" ] && unlock_account_ok "$GRAPHICAL_USER"; then
+        echo "$GRAPHICAL_USER"
+        return 0
+    fi
+    desktop_users | head -n1
+}
+
+verify_local_password() {
+    local user="$1" pass="$2" helper
+    helper="/usr/local/bin/project-anthony-auth"
+    [ -x "$helper" ] || helper="$(command -v project-anthony-auth 2>/dev/null || true)"
+    [ -n "$helper" ] && [ -x "$helper" ] || return 1
+    printf '%s\n' "$pass" | "$helper" "$user" >/dev/null 2>&1
+}
+
+require_console_auth() {
+    local default_user typed user pass fails=0
+    default_user=$(default_unlock_user)
+    while true; do
+        clear
+        echo "========================================================="
+        echo " PROJECT ANTHONY: CONSOLE UNLOCK"
+        echo "========================================================="
+        echo " This is a root rescue console. Unlock with a local"
+        echo " account password before the menu or crash restore."
+        echo ""
+        if [ ! -x /usr/local/bin/project-anthony-auth ]; then
+            echo " Auth helper is not installed. Reinstall Project Anthony."
+            echo ""
+        fi
+        if [ -n "$default_user" ]; then
+            echo " User [$default_user], or 'desktop' to leave:"
+        else
+            echo " User (or 'desktop' to leave):"
+        fi
+        typed=""
+        IFS= read -r -p " " typed </dev/tty || true
+        if [ -z "$typed" ]; then
+            user="$default_user"
+        else
+            user="$typed"
+        fi
+        if [ "$user" = "desktop" ] || [ "$user" = "d" ] || [ "$user" = "D" ]; then
+            escape_to_desktop
+            exit 0
+        fi
+        if ! unlock_account_ok "$user"; then
+            echo ""
+            echo " Authentication failed."
+            fails=$((fails + 1))
+            sleep $((fails >= 5 ? 8 : 2))
+            continue
+        fi
+        echo ""
+        IFS= read -r -s -p " Password: " pass </dev/tty || true
+        echo ""
+        if [ -n "$pass" ] && verify_local_password "$user" "$pass"; then
+            pass=""
+            unset pass
+            echo ""
+            echo "✔ Console unlocked."
+            sleep 1
+            return 0
+        fi
+        pass=""
+        unset pass
+        echo ""
+        echo " Authentication failed."
+        fails=$((fails + 1))
+        sleep $((fails >= 5 ? 8 : 2))
+    done
 }
 
 # 🧼 THE INTEGRATED SELF-CLEANUP UNINSTALL ENGINE
@@ -211,6 +328,8 @@ execute_system_teardown() {
         rm -f /usr/local/bin/project-anthony-tty
         rm -f /usr/local/bin/project-anthony-bind-hotkeys
         rm -f /usr/local/bin/project-anthony-show-manual
+        rm -f /usr/local/bin/project-anthony-auth
+        rm -f /etc/pam.d/project-anthony
         rm -f /usr/share/applications/project-anthony.desktop
         rm -f /usr/share/applications/project-anthony-manual.desktop
         rm -f /usr/share/doc/project-anthony/README.txt
@@ -293,13 +412,53 @@ execute_system_teardown() {
 
 # Prompt used when the background watchdog detects a crash.
 # Y restores from Timeshift. N asks whether to return to the desktop.
+# State file (written by anthony-monitor): line 1 = CRASH_TRIGGERED,
+# line 2 = one-line summary, remaining lines = short evidence snippet.
+STATE_FILE="/run/project-anthony-state"
+# Match anthony-monitor.sh: printable ASCII, 8 x 76. Re-apply on read so a
+# stale or tampered state file cannot inject control chars into the TTY.
+sanitize_crash_text() {
+    tr -cd '\11\12\15\40-\176' \
+        | sed -e 's/[[:space:]]\+/ /g' -e 's/^ //' \
+        | cut -c1-76 \
+        | grep -v '^$' \
+        | head -n 8
+}
+
+rolling_snapshot_id() {
+    local id
+    id=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+    [[ "$id" =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    printf '%s\n' "$id"
+}
+
 crash_recovery_prompt() {
-    rm -f /run/project-anthony-state
+    local summary="" details=""
+    if [ -f "$STATE_FILE" ]; then
+        summary=$(sed -n '2p' "$STATE_FILE" 2>/dev/null | sanitize_crash_text | head -n 1)
+        details=$(tail -n +3 "$STATE_FILE" 2>/dev/null | sanitize_crash_text)
+        rm -f "$STATE_FILE"
+    fi
+    if [ -z "$summary" ]; then
+        if [ "$1" = "--crash-prompt" ]; then
+            summary="Test crash prompt (no live watchdog event)"
+        else
+            summary="a system crash"
+        fi
+    fi
+
     clear
     echo "========================================================="
     echo "⚠️  PROJECT ANTHONY: CRASH RECOVERY SHIELD"
     echo "========================================================="
-    echo "Anthony monitor has detected a system crash."
+    echo "Anthony monitor has detected:"
+    echo ""
+    echo "  $summary"
+    if [ -n "$details" ]; then
+        echo ""
+        printf '%s\n' "$details" | sed 's/^/  /'
+    fi
+    echo ""
     echo "Would you like to restore from backup? [y/n]"
     echo "---------------------------------------------------------"
     echo ""
@@ -308,7 +467,7 @@ crash_recovery_prompt() {
 
     if [[ "$crash_choice" == "y" || "$crash_choice" == "Y" ]]; then
         echo "🚀 Opening Timeshift restore..."
-        SYSTEM_SNAP_ID=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+        SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
         if [ -n "$SYSTEM_SNAP_ID" ]; then
             sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
         else
@@ -375,13 +534,18 @@ if [ "$1" != "--run-core-menu" ] && [ "$1" != "--crash-prompt" ] && [ "$1" != "-
 
     # Relaunch ourselves inside a clean, perfectly scaled full-screen terminal window
     # The '--run-core-menu' flag lets the script know it can skip the check on the next loop
-    exec gnome-terminal --full-screen --zoom="$ZOOM_SCALE" -- bash -c "$0 --run-core-menu; exec bash"
+    exec gnome-terminal --full-screen --zoom="$ZOOM_SCALE" -- "$0" --run-core-menu
+fi
+
+# TTY3 / crash console is already root. Unlock with a local password before
+# the crash restore prompt or the rescue menu. Desktop Ctrl+Alt+X is unchanged.
+if [ "$ON_KERNEL_VT" -eq 1 ]; then
+    require_console_auth || exit 1
 fi
 
 # 🚨 Watchdog intercept: crash flag from the monitor, or an explicit test flag
-STATE_FILE="/run/project-anthony-state"
-if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
-    crash_recovery_prompt
+if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(head -n1 "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
+    crash_recovery_prompt "$1"
 fi
 
 
@@ -418,12 +582,8 @@ do
 		else
 			echo " 5. Return to Graphical Desktop"
 		fi
-		echo " 6. Exit to Open Command Shell"
-	elif [ "$CURRENT_SESSION_TYPE" == "x11" ] || [ "$CURRENT_SESSION_TYPE" == "wayland" ]; then
-		echo " 5. Exit to Graphical Desktop"
-		echo " 6. Exit to Open Terminal (Shell)"
 	else
-		echo " 5. Exit to Open Command Shell"
+		echo " 5. Exit to Graphical Desktop"
 	fi
 	echo " h. View Manual (hotkeys, what it does, how to open it)"
 	echo "=========================================="
@@ -524,7 +684,8 @@ do
 			echo "------------------------------------------------------------------------="
 			
 			if ! command -v smartctl &>/dev/null; then
-				sudo apt install -y smartmontools &>/dev/null
+				echo "⚠️  smartctl is not installed. SMART health will show as unknown."
+				echo "    Install smartmontools from a normal session if you need it."
 			fi
 
 			for disk in $(lsblk -dno NAME,TYPE | grep "disk" | awk '{print $1}'); do
@@ -561,7 +722,7 @@ do
 			if [ "$drive_choice" == "x" ] || [ "$drive_choice" == "X" ]; then escape_to_desktop; continue; fi
 			if [ -z "$drive_choice" ]; then continue; fi
 			
-			if [ ! -b "/dev/$drive_choice" ]; then
+			if ! is_disk_name "$drive_choice" || [ ! -b "/dev/$drive_choice" ]; then
 				echo "❌ Error: Device '/dev/$drive_choice' is not a valid block device."
 				read -p "Press [Enter] key to continue..." fakeKey
 				continue
@@ -581,7 +742,7 @@ do
 				continue
 			fi
 
-			if [ -b "/dev/$dest_choice" ]; then
+			if is_disk_name "$dest_choice" && [ -b "/dev/$dest_choice" ]; then
 				DEST_PATH="/dev/$dest_choice"
 				DEST_SIZE_BYTES=$(blockdev --getsize64 "$DEST_PATH")
 				DEST_SIZE_GB=$(echo "scale=2; $DEST_SIZE_BYTES / 1024 / 1024 / 1024" | bc)
@@ -595,10 +756,11 @@ do
 					read -p "Force proceed anyway? [y/n]: " force_choice
 					if [[ "$force_choice" != "y" && "$force_choice" != "Y" ]]; then continue; fi
 				fi
-			elif [ -d "$dest_choice" ]; then
+			elif allowed_clone_dir "$dest_choice"; then
 				DEST_PATH="$dest_choice/${drive_choice}_backup.img"
 			else
-				echo "❌ Error: Destination target is invalid."
+				echo "❌ Error: Destination must be another disk (e.g. sdb) or a folder"
+				echo "   under /mnt, /media, /root, or /home."
 				read -p "Press [Enter] key to continue..." fakeKey
 				continue
 			fi
@@ -612,7 +774,12 @@ do
 
 			if [[ "$final_lock" == "y" || "$final_lock" == "Y" ]]; then
 				echo "🚀 Deploying cloning stream via ddrescue..."
-				sudo ddrescue -v -b 4096 "$SRC_PATH" "$DEST_PATH" "${HOME}/${drive_choice}_rescue.log"
+				if [ "$(id -u)" -eq 0 ]; then
+					RESCUE_LOG="/root/${drive_choice}_rescue.log"
+				else
+					RESCUE_LOG="${HOME:-/tmp}/${drive_choice}_rescue.log"
+				fi
+				sudo ddrescue -v -b 4096 "$SRC_PATH" "$DEST_PATH" "$RESCUE_LOG"
 				echo "✔ Sector streaming complete."
 			else
 				echo "❌ Migration execution cancelled."
@@ -622,7 +789,7 @@ do
 		3)
 			echo "🚨 Timeshift System Restoration"
 			echo "------------------------------------------"
-			SYSTEM_SNAP_ID=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+			SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
 
 			if [ ! -z "$SYSTEM_SNAP_ID" ]; then
 				read -p "Restore from automated system backup ($SYSTEM_SNAP_ID)? [y/n] (or [x] to exit to desktop): " quick_choice
@@ -645,9 +812,8 @@ do
 			echo "========================================================================="
 			
 			if ! command -v sensors &>/dev/null; then
-				echo "🔄 Provisioning hardware sensor modules (lm-sensors)..."
-				sudo apt install -y lm-sensors &>/dev/null
-				sudo sensors-detect --auto &>/dev/null
+				echo "⚠️  sensors is not installed. Voltage/fan data will be skipped."
+				echo "    Install lm-sensors from a normal session if you need it."
 			fi
 
 			echo "⚡ Motherboard Voltages, Thermals & Fan Controllers:"
@@ -669,23 +835,20 @@ do
 		5)
 			if [ "$ON_RESCUE_VT" -eq 1 ]; then
 				escape_to_desktop
+				# Exit so systemd restarts a locked TUI. Next F3 asks again.
+				exit 0
 			else
 				# Already inside a desktop terminal window — just close the TUI.
 				exit 0
 			fi
 			;;
-		6)
-			echo "🚪 Dropping to a root shell. Type 'exit' to return to the rescue menu."
-			export PS1='[anthony] \u@\h:\w# '
-			exec /bin/bash --noprofile --norc -i
-			;;
 		h|H|help|manual|m|M)
 			MANUAL="/usr/share/doc/project-anthony/README.txt"
 			[ -f "$MANUAL" ] || MANUAL="/usr/share/doc/project-anthony/README"
 			if [ "$ON_RESCUE_VT" -eq 1 ] || [ ! -x /usr/local/bin/project-anthony-show-manual ]; then
-				less -X "$MANUAL"
+				page_manual "$MANUAL"
 			else
-				/usr/local/bin/project-anthony-show-manual || less -X "$MANUAL"
+				/usr/local/bin/project-anthony-show-manual || page_manual "$MANUAL"
 			fi
 			;;
 		u|uninstall|U|UNINSTALL)
