@@ -119,8 +119,8 @@ SECURITY NOTE:
   password is accepted (your desktop user by default). After unlock,
   60 seconds idle at a prompt relocks the console. Failed unlocks wait
   10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
-  fifth failed attempt scans for a registered rescue USB (if you made
-  one) and otherwise force-shuts the machine down. The count stays
+  fifth failed attempt locks the console until a registered rescue USB
+  is inserted (or you reboot; reboot clears the count). The count stays
   in /run and clears on reboot. There is no root
   shell. The TUI does not install packages, and disk clones only go to
   another disk or a folder under /mnt, /media, /root, or /home.
@@ -133,19 +133,22 @@ RESCUE USB TOKEN (optional, not in the menu):
   From a working desktop, mount a USB stick and run:
     sudo project-anthony-mk-token /media/YOU/USBNAME
   That writes project-anthony.rescue onto the stick and stores only a
-  SHA-256 hash on the machine. On the fifth failed TTY3 password, plug
-  the stick in: a match unlocks instead of shutting down. Copy the file
-  to extra sticks if you want backups. Revoke with:
+  SHA-256 hash on the machine. On the fifth failed TTY3 password the
+  console stays locked until you plug that stick in (a match unlocks).
+  Copy the file to extra sticks if you want backups. Revoke with:
     sudo project-anthony-mk-token --revoke
-  If you never create a token, the fifth failure still shuts down.
+  If you never create a token, the fifth failure stays locked until reboot.
 
 FIDO2 / U2F SECURITY KEY (optional, not in the menu):
   Only if you already use a hardware key (YubiKey-style). Install the
   PAM module, then enroll or import from a working desktop:
     sudo apt install libpam-u2f
     sudo project-anthony-mk-token --u2f
+    sudo project-anthony-mk-token --u2f alice
     sudo project-anthony-mk-token --u2f-import
-  After that, TTY3 asks that account to touch the key after the
+  Each username gets its own key(s). Run --u2f again for another person
+  on a shared workstation, or again for the same person to add a spare.
+  After that, TTY3 asks that account to touch a registered key after the
   password. Accounts with no mapping still unlock with password alone.
   Turn it off with: sudo project-anthony-mk-token --u2f-disable
   PKCS#11 smart cards are not used; this is FIDO2/U2F only.

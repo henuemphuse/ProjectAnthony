@@ -303,15 +303,6 @@ AUTH_TOKEN_BYPASS=0
 TOKEN_NAME="project-anthony.rescue"
 TOKEN_HASH_FILE="/etc/project-anthony/rescue-token.sha256"
 USB_CHECK_MNT="/run/project-anthony-usbcheck"
-USB_SCAN_SECS=45
-
-force_auth_lockout_shutdown() {
-    echo ""
-    echo " Five failed unlock attempts. Shutting down."
-    sleep 3
-    systemctl poweroff --no-wall >/dev/null 2>&1 || shutdown -h now
-    exit 1
-}
 
 rescue_token_registered() {
     [ -s "$TOKEN_HASH_FILE" ]
@@ -410,28 +401,25 @@ find_rescue_token() {
     scan_unmounted_usb_for_token
 }
 
-# Fifth failed password: if a token was registered from a normal root shell,
-# scan removable media briefly. Match unlocks. No token, or no stick → poweroff.
-try_rescue_usb_bypass() {
-    local waited=0
-    rescue_token_registered || return 1
+# Fifth failed password: stop taking passwords. Stay locked until a
+# registered rescue USB is inserted. Reboot also clears the fail count.
+wait_for_lockout_key() {
     echo ""
-    echo " Insert the rescue USB if you have one."
-    echo -n " Scanning"
-    while [ "$waited" -lt "$USB_SCAN_SECS" ]; do
+    echo " Five failed unlock attempts. Console locked."
+    if rescue_token_registered; then
+        echo " Insert the rescue USB to unlock. Reboot also starts over."
+    else
+        echo " No rescue USB is registered. Reboot to try passwords again."
+    fi
+    while true; do
         if find_rescue_token; then
-            echo ""
             echo " Rescue USB accepted."
             clear_auth_fails
             sleep 1
             return 0
         fi
-        echo -n "."
         sleep 2
-        waited=$((waited + 2))
     done
-    echo ""
-    return 1
 }
 
 note_auth_failure() {
@@ -442,17 +430,15 @@ note_auth_failure() {
     echo ""
     echo " Authentication failed. (${fails}/${AUTH_LOCKOUT})"
     if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
-        if try_rescue_usb_bypass; then
-            AUTH_TOKEN_BYPASS=1
-            fails=0
-            return 0
-        fi
-        force_auth_lockout_shutdown
+        wait_for_lockout_key
+        AUTH_TOKEN_BYPASS=1
+        fails=0
+        return 0
     fi
     auth_fail_wait "$fails"
 }
 
-# 1–2: 10s. 3: 60s. 4: 3min. 5: shutdown. Count lives in /run across TTY restarts.
+# 1–2: 10s. 3: 60s. 4: 3min. 5: lock until rescue USB (or reboot). Count lives in /run.
 auth_fail_wait() {
     local fails="$1" delay=0
     case "$fails" in
@@ -470,10 +456,8 @@ require_console_auth() {
     fails=$(load_auth_fails)
     default_user=$(default_unlock_user)
     if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
-        if try_rescue_usb_bypass; then
-            return 0
-        fi
-        force_auth_lockout_shutdown
+        wait_for_lockout_key
+        return 0
     fi
     if [ "$fails" -ge 1 ] && [ "$fails" -lt "$AUTH_LOCKOUT" ]; then
         auth_fail_wait "$fails"

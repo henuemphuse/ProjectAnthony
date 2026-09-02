@@ -2,13 +2,14 @@
 # =========================================================================
 #  Project Anthony: rescue-token tool (not part of the TUI menu)
 # =========================================================================
-# USB file token (fifth failed password → unlock instead of shutdown):
+# USB file token (fifth failed password → lock until this stick is inserted):
 #   sudo project-anthony-mk-token /media/you/USBSTICK
 #   sudo project-anthony-mk-token --revoke
 #
-# Optional FIDO2/U2F (password then touch; requires libpam-u2f):
-#   sudo project-anthony-mk-token --u2f
-#   sudo project-anthony-mk-token --u2f-import
+# Optional FIDO2/U2F (password then touch; requires libpam-u2f).
+# Repeat per person for a shared workstation; repeat per spare key:
+#   sudo project-anthony-mk-token --u2f [user]
+#   sudo project-anthony-mk-token --u2f-import [user]
 #   sudo project-anthony-mk-token --u2f-disable
 #
 #   sudo project-anthony-mk-token --status
@@ -23,7 +24,7 @@ usage() {
     echo "Create or revoke TTY3 rescue tokens."
     echo "Not available from the rescue menu — run this from a normal root shell."
     echo ""
-    echo "USB file token (fifth failed unlock):"
+    echo "USB file token (fifth failed unlock waits for this stick):"
     echo "  sudo project-anthony-mk-token <usb-mount-or-directory>"
     echo "  sudo project-anthony-mk-token --revoke"
     echo ""
@@ -32,6 +33,7 @@ usage() {
     echo "  sudo project-anthony-mk-token --u2f [user]"
     echo "  sudo project-anthony-mk-token --u2f-import [user]"
     echo "  sudo project-anthony-mk-token --u2f-disable"
+    echo "  Repeat --u2f for each person on a shared machine, or a spare key."
     echo ""
     echo "  sudo project-anthony-mk-token --status"
 }
@@ -82,8 +84,37 @@ append_u2f_line() {
     printf '%s\n' "$line" >> "$U2F_FILE"
 }
 
+# pam_u2f: extra keys for the same user go on the same line after another colon.
+# A new username gets its own line, so a shared machine can hold alice + bob.
+user_has_u2f_line() {
+    local u="$1"
+    [ -s "$U2F_FILE" ] || return 1
+    awk -F: -v u="$u" 'NF && $1==u {found=1} END{exit !found}' "$U2F_FILE"
+}
+
+append_u2f_cred() {
+    local user="$1" cred="$2" tmp
+    [ -n "$user" ] && [ -n "$cred" ] || return 1
+    ensure_hash_dir
+    touch "$U2F_FILE"
+    chmod 600 "$U2F_FILE"
+    if grep -Fq -- ":$cred" "$U2F_FILE" 2>/dev/null; then
+        return 0
+    fi
+    if ! user_has_u2f_line "$user"; then
+        printf '%s:%s\n' "$user" "$cred" >> "$U2F_FILE"
+        return 0
+    fi
+    tmp=$(mktemp) || return 1
+    awk -F: -v u="$user" -v extra="$cred" '
+        $1==u && !done { print $0 ":" extra; done=1; next }
+        { print }
+    ' "$U2F_FILE" > "$tmp" && mv "$tmp" "$U2F_FILE"
+    chmod 600 "$U2F_FILE"
+}
+
 u2f_enroll() {
-    local user line
+    local user line cred
     require_pam_u2f
     if ! command -v pamu2fcfg >/dev/null; then
         echo "pamu2fcfg is missing. Reinstall libpam-u2f."
@@ -95,19 +126,23 @@ u2f_enroll() {
         exit 1
     fi
     echo "Enrolling a FIDO2/U2F key for '$user'."
-    echo "Plug the key in, then touch it when it blinks."
+    echo "Plug that person's key in, then touch it when it blinks."
+    echo "Run this again with another username for a shared workstation."
+    echo "Run this again with the same username to add a spare key."
     line=$(pamu2fcfg -u "$user") || {
         echo "Enrollment failed. Is the key plugged in?"
         exit 1
     }
     line=$(printf '%s\n' "$line" | tr -d '\r' | grep -v '^$' | head -n1)
-    if ! append_u2f_line "$line"; then
-        echo "pamu2fcfg did not return a usable mapping line."
+    [[ "$line" == *:* ]] || { echo "pamu2fcfg did not return a usable mapping line."; exit 1; }
+    cred="${line#*:}"
+    if ! append_u2f_cred "$user" "$cred"; then
+        echo "Failed to write $U2F_FILE"
         exit 1
     fi
     echo "Registered in $U2F_FILE"
-    echo "TTY3 will ask this account to touch the key after the password."
-    echo "USB file-token bypass (if you made one) still skips this on the fifth failure."
+    echo "TTY3 will ask this account to touch a registered key after the password."
+    echo "A rescue USB (if you made one) still unlocks after five failures."
 }
 
 u2f_import() {
@@ -153,9 +188,9 @@ u2f_disable() {
 
 print_status() {
     if [ -s "$HASH_FILE" ]; then
-        echo "USB rescue token: registered (fifth failed TTY3 unlock can accept the stick)."
+        echo "USB rescue token: registered (fifth failed TTY3 unlock waits for the stick)."
     else
-        echo "USB rescue token: none (fifth failed TTY3 unlock shuts down)."
+        echo "USB rescue token: none (fifth failed TTY3 unlock stays locked until reboot)."
     fi
     if [ -s "$U2F_FILE" ]; then
         echo "FIDO2/U2F: enabled for $(awk -F: 'NF && $1 !~ /^#/ {print $1}' "$U2F_FILE" | sort -u | tr '\n' ' ')"
