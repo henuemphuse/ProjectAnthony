@@ -106,19 +106,52 @@ SYSTEM ALTERATIONS MADE:
   - TTY3 rescue console: project-anthony-tty.service (getty@tty3 masked)
   - TTY3 password unlock: /usr/local/bin/project-anthony-auth
     and /etc/pam.d/project-anthony
+  - Optional USB rescue token: sudo project-anthony-mk-token <usb-mount>
+    (not in the TUI; machine stores only a hash in /etc/project-anthony)
+  - Optional FIDO2/U2F: sudo apt install libpam-u2f, then
+    sudo project-anthony-mk-token --u2f  (or --u2f-import)
   - Magic SysRq unraw only (kernel.sysrq=16) via /etc/sysctl.d/99-project-anthony-sysrq.conf
   - Crash watchdog: project-anthony-monitor.service (enabled at install)
 
 SECURITY NOTE:
   TTY3 still runs as root so a frozen machine can be recovered, but the
   menu and crash-restore prompt stay locked until a local account
-  password is accepted (your desktop user by default). There is no root
+  password is accepted (your desktop user by default). After unlock,
+  60 seconds idle at a prompt relocks the console. Failed unlocks wait
+  10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
+  fifth failed attempt locks the console until a registered rescue USB
+  is inserted (or you reboot; reboot clears the count). The count stays
+  in /run and clears on reboot. There is no root
   shell. The TUI does not install packages, and disk clones only go to
   another disk or a folder under /mnt, /media, /root, or /home.
   Type 'desktop' at the user prompt to leave without unlocking.
   Next F3 asks again. Magic SysRq is keyboard unraw only (sysrq = 16).
   Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X is
   cleared and Cinnamon drops the grab.
+
+RESCUE USB TOKEN (optional, not in the menu):
+  From a working desktop, mount a USB stick and run:
+    sudo project-anthony-mk-token /media/YOU/USBNAME
+  That writes project-anthony.rescue onto the stick and stores only a
+  SHA-256 hash on the machine. On the fifth failed TTY3 password the
+  console stays locked until you plug that stick in (a match unlocks).
+  Copy the file to extra sticks if you want backups. Revoke with:
+    sudo project-anthony-mk-token --revoke
+  If you never create a token, the fifth failure stays locked until reboot.
+
+FIDO2 / U2F SECURITY KEY (optional, not in the menu):
+  Only if you already use a hardware key (YubiKey-style). Install the
+  PAM module, then enroll or import from a working desktop:
+    sudo apt install libpam-u2f
+    sudo project-anthony-mk-token --u2f
+    sudo project-anthony-mk-token --u2f alice
+    sudo project-anthony-mk-token --u2f-import
+  Each username gets its own key(s). Run --u2f again for another person
+  on a shared workstation, or again for the same person to add a spare.
+  After that, TTY3 asks that account to touch a registered key after the
+  password. Accounts with no mapping still unlock with password alone.
+  Turn it off with: sudo project-anthony-mk-token --u2f-disable
+  PKCS#11 smart cards are not used; this is FIDO2/U2F only.
 
 =========================================================================
 👉 PRESS [Q] AT ANY TIME TO EXIT
