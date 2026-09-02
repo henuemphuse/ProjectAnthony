@@ -18,6 +18,23 @@ fi
 INSTALL_ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$INSTALL_ROOT/src"
 
+install_auth_helper() {
+    local dest_bin="/usr/local/bin/project-anthony-auth"
+    local dest_pam="/etc/pam.d/project-anthony"
+    local pamlib=""
+    cp -f "$INSTALL_ROOT/packaging/project-anthony.pam" "$dest_pam"
+    pamlib=$(ls /lib/*/libpam.so.0 /usr/lib/*/libpam.so.0 2>/dev/null | head -n1)
+    if command -v gcc >/dev/null && [ -n "$pamlib" ] && \
+        gcc -O2 -s -o "$dest_bin" "$SRC_DIR/project-anthony-auth.c" "$pamlib" 2>/dev/null; then
+        echo "✔ Installed PAM console-unlock helper."
+    else
+        cp -f "$SRC_DIR/project-anthony-auth.py" "$dest_bin"
+        echo "✔ Installed PAM console-unlock helper (python fallback)."
+    fi
+    chmod 755 "$dest_bin"
+    chmod 644 "$dest_pam"
+}
+
 echo "=================================================="
 echo "          PROJECT ANTHONY: DEPLOYMENT             "
 echo "=================================================="
@@ -50,12 +67,18 @@ fi
 
 # 2. Establish Workspace Architecture
 echo "📁 Step 2: Syncing system configuration pathways..."
-USER_HOME=$(eval echo "~$SUDO_USER")
+USER_HOME=""
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+fi
+[ -z "$USER_HOME" ] && USER_HOME=/root
 CONFIG_DIR="$USER_HOME/.config/liferaft"
 
 if [ ! -d "$CONFIG_DIR" ]; then
     mkdir -p "$CONFIG_DIR"
-    chown -R "$SUDO_USER:$SUDO_USER" "$CONFIG_DIR"
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        chown -R "$SUDO_USER:$SUDO_USER" "$CONFIG_DIR"
+    fi
     echo "✔ Created configuration storage matrix at $CONFIG_DIR"
 fi
 
@@ -77,6 +100,7 @@ cp -f "$INSTALL_ROOT/src/project-anthony-bind-hotkeys.sh" /usr/local/bin/project
 cp -f "$INSTALL_ROOT/src/project-anthony-show-manual.sh" /usr/local/bin/project-anthony-show-manual
 chmod +x /usr/local/bin/project-anthony-monitor /usr/local/bin/project-anthony-tty \
     /usr/local/bin/project-anthony-bind-hotkeys /usr/local/bin/project-anthony-show-manual
+install_auth_helper
 cp -f "$INSTALL_ROOT/packaging/project-anthony-monitor.service" /etc/systemd/system/project-anthony-monitor.service
 cp -f "$INSTALL_ROOT/packaging/project-anthony-tty.service" /etc/systemd/system/project-anthony-tty.service
 mkdir -p /etc/xdg/autostart /usr/share/applications /usr/share/doc/project-anthony
@@ -88,7 +112,8 @@ cp -f "$INSTALL_ROOT/src/README.txt" /usr/share/doc/project-anthony/README.txt
 cp -f "$INSTALL_ROOT/LICENSE" /usr/share/doc/project-anthony/LICENSE
 cp -f "$INSTALL_ROOT/LICENSE" /usr/share/doc/project-anthony/copyright
 systemctl daemon-reload
-systemctl enable --now project-anthony-monitor.service
+systemctl enable project-anthony-monitor.service
+systemctl restart project-anthony-monitor.service
 echo "✔ Deployed lightweight crash watchdog (project-anthony-monitor.service)."
 
 # 4. Inject the Automated Rolling Snapshot System
@@ -126,17 +151,18 @@ systemctl stop getty@tty3.service >/dev/null 2>&1 || true
 systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
 systemctl mask getty@tty3.service >/dev/null 2>&1 || true
 systemctl enable --now project-anthony-tty.service
-echo "✔ TTY3 rescue console is active."
+systemctl restart project-anthony-tty.service >/dev/null 2>&1 || true
+echo "✔ TTY3 rescue console is active (password unlock required)."
 
 # 9. Magic SysRq — last path when even systemd/chvt are wedged
 # Alt+SysRq+R puts the keyboard back in cooked mode so Ctrl+Alt+F3 can land.
 echo "⌨️  Step 9: Enabling Magic SysRq keyboard recovery..."
 cat << 'EOF' > /etc/sysctl.d/99-project-anthony-sysrq.conf
-# Project Anthony: allow Magic SysRq so a hung compositor can still unraw the kbd
-kernel.sysrq = 1
+# Project Anthony: Alt+SysRq+R only (unraw). Do not enable the full SysRq set.
+kernel.sysrq = 16
 EOF
 sysctl -p /etc/sysctl.d/99-project-anthony-sysrq.conf >/dev/null
-echo "✔ Magic SysRq enabled (Alt+SysRq+R, then Ctrl+Alt+F3)."
+echo "✔ Magic SysRq unraw enabled (Alt+SysRq+R, then Ctrl+Alt+F3)."
 
 # 10. Deliver System Documentation Matrix (README Display)
 echo "📄 Step 10: Launching Project Anthony Documentation..."

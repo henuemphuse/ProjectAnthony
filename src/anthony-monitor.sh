@@ -11,6 +11,8 @@ CURSOR_FILE="/run/project-anthony-monitor.cursor"
 POLL_SEC=4
 BOOT_GRACE_SEC=45
 STARTED_AT="$(date +%s)"
+# State/cursor files are root-only. Random local UIDs must not read crash evidence.
+umask 077
 
 wm_running() {
     pgrep -x cinnamon >/dev/null \
@@ -47,7 +49,9 @@ compositor_dead() {
     return 0
 }
 
-KERNEL_FAULT_RE='Oops:|kernel panic|BUG: |hung_task|soft lockup|hard LOCKUP|segfault at'
+# Kernel faults only. Userspace "segfault at" lines are omitted so a crashing
+# app cannot steal the physical console onto the passwordless TTY3 TUI.
+KERNEL_FAULT_RE='Oops:|kernel panic|BUG: unable to handle|hung_task|soft lockup|hard LOCKUP'
 
 # TTY-safe, short evidence block (8 x 76). Control chars stripped.
 sanitize_report() {
@@ -114,7 +118,7 @@ collect_crash_report() {
     CRASH_SUMMARY=""
     CRASH_DETAIL=""
     if kernel_fault; then
-        CRASH_SUMMARY="Kernel oops, panic, hung task, or segfault"
+        CRASH_SUMMARY="Kernel oops, panic, or hung task"
         CRASH_DETAIL=$(kernel_fault_report)
         return 0
     fi
@@ -143,7 +147,7 @@ trigger_rescue() {
         echo "$CRASH_SUMMARY"
         printf '%s\n' "$CRASH_DETAIL"
     } > "$STATE_FILE"
-    chmod 644 "$STATE_FILE" 2>/dev/null || true
+    chmod 600 "$STATE_FILE" 2>/dev/null || true
     logger -t project-anthony-monitor "Crash detected ($CRASH_SUMMARY) — switching to TTY3 Timeshift rescue prompt"
     if [ -n "$CRASH_DETAIL" ]; then
         logger -t project-anthony-monitor "$(printf '%s' "$CRASH_DETAIL" | tr '\n' '|' )"
@@ -153,7 +157,10 @@ trigger_rescue() {
 }
 
 # Ignore kernel messages that already existed before this daemon started.
+# chmod after write: overwriting an old 644 file keeps its mode.
 date --iso-8601=seconds > "$CURSOR_FILE"
+chmod 600 "$CURSOR_FILE" 2>/dev/null || true
+[ -f "$STATE_FILE" ] && chmod 600 "$STATE_FILE" 2>/dev/null || true
 LATCHED=0
 
 while true; do
@@ -168,6 +175,7 @@ while true; do
             trigger_rescue
             LATCHED=1
             date --iso-8601=seconds > "$CURSOR_FILE"
+            chmod 600 "$CURSOR_FILE" 2>/dev/null || true
         fi
     else
         LATCHED=0

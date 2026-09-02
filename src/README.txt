@@ -31,9 +31,9 @@ RECOVERY LAYERS:
 
   2. Desktop frozen, kernel + systemd still alive
        [Ctrl] + [Alt] + [F3]
-       Kernel virtual-terminal switch onto TTY3. A dedicated systemd
-       service owns that console and draws the rescue TUI (getty is
-       masked so it cannot crash-loop and leave a blank cursor).
+       Kernel virtual-terminal switch onto TTY3. Unlock with your local
+       account password, then the rescue TUI runs (getty is masked so it
+       cannot crash-loop and leave a blank cursor).
 
   3. Keyboard stuck in raw/X grab (compositor dead, kernel alive)
        Hold [Alt], tap [SysRq] (often Print Screen), tap [R]
@@ -62,12 +62,13 @@ BACKGROUND WATCHDOG:
   project-anthony-monitor.service is a low-priority daemon (nice 19, idle
   I/O, 32 MB cap). Every few seconds it checks for a compositor death
   under a live graphical login, a failed display manager, or a new kernel
-  oops/panic/hung_task/segfault. On a hit it writes a crash report (what
+  oops/panic/hung_task. On a hit it writes a crash report (what
   failed, plus a short journal snippet), restarts TTY3, and switches you
-  there.
+  there. TTY3 asks for a local account password before the crash prompt
+  or the rescue menu. Returning to the desktop locks it again.
 
   The TUI then names what tripped the watchdog and prints the evidence:
-    Kernel oops, panic, hung task, or segfault
+    Kernel oops, panic, or hung task
       Comm:/RIP: lines from the kernel journal (which process blew up)
     Display manager failed
       Unit name, systemd result, last error lines
@@ -103,12 +104,19 @@ SYSTEM ALTERATIONS MADE:
   - First-run autostart: project-anthony-first-run.desktop (shows this manual if
     dpkg ran without a live graphical session)
   - TTY3 rescue console: project-anthony-tty.service (getty@tty3 masked)
-  - Magic SysRq enabled via /etc/sysctl.d/99-project-anthony-sysrq.conf
+  - TTY3 password unlock: /usr/local/bin/project-anthony-auth
+    and /etc/pam.d/project-anthony
+  - Magic SysRq unraw only (kernel.sysrq=16) via /etc/sysctl.d/99-project-anthony-sysrq.conf
   - Crash watchdog: project-anthony-monitor.service (enabled at install)
 
 SECURITY NOTE:
-  TTY3 autologs in as root so a frozen machine can still be recovered
-  without a password prompt. Physical console access equals root.
+  TTY3 still runs as root so a frozen machine can be recovered, but the
+  menu and crash-restore prompt stay locked until a local account
+  password is accepted (your desktop user by default). There is no root
+  shell. The TUI does not install packages, and disk clones only go to
+  another disk or a folder under /mnt, /media, /root, or /home.
+  Type 'desktop' at the user prompt to leave without unlocking.
+  Next F3 asks again. Magic SysRq is keyboard unraw only (sysrq = 16).
   Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X is
   cleared and Cinnamon drops the grab.
 
