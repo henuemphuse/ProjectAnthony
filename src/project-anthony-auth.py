@@ -2,13 +2,17 @@
 """Fallback PAM check when the C helper was not compiled. Same CLI as the C binary."""
 import ctypes
 import ctypes.util
+import getpass
 import os
 import sys
 
 PAM_SUCCESS = 0
 PAM_PROMPT_ECHO_OFF = 1
 PAM_PROMPT_ECHO_ON = 2
+PAM_ERROR_MSG = 3
+PAM_TEXT_INFO = 4
 PAM_BUF_ERR = 5
+PAM_CONV_ERR = 19
 
 
 class PamHandle(ctypes.c_void_p):
@@ -36,13 +40,34 @@ class PamConv(ctypes.Structure):
     _fields_ = [("conv", CONV_FUNC), ("appdata_ptr", ctypes.c_void_p)]
 
 
+def tty_msg(text: str) -> None:
+    try:
+        with open("/dev/tty", "w") as t:
+            t.write(text if text.endswith("\n") else text + "\n")
+            t.flush()
+    except OSError:
+        sys.stderr.write(text if text.endswith("\n") else text + "\n")
+        sys.stderr.flush()
+
+
 def main() -> int:
     if os.geteuid() != 0:
         return 1
-    if len(sys.argv) != 2 or not sys.argv[1]:
+    u2f = False
+    if len(sys.argv) == 3 and sys.argv[1] == "--u2f":
+        u2f = True
+        username = sys.argv[2]
+        service = b"project-anthony-u2f"
+        password = ""
+    elif len(sys.argv) == 2:
+        username = sys.argv[1]
+        service = b"project-anthony"
+        password = sys.stdin.readline().rstrip("\n")
+    else:
         return 2
-    password = sys.stdin.readline().rstrip("\n")
-    user = sys.argv[1].encode()
+    if not username:
+        return 2
+    user = username.encode()
     pass_bytes = password.encode()
     libname = ctypes.util.find_library("pam") or "libpam.so.0"
     libpam = ctypes.CDLL(libname)
@@ -64,7 +89,16 @@ def main() -> int:
         keep.append(arr)
         for i in range(nmsg):
             style = msg[i].contents.msg_style
-            if style in (PAM_PROMPT_ECHO_OFF, PAM_PROMPT_ECHO_ON):
+            text = msg[i].contents.msg.decode() if msg[i].contents.msg else ""
+            if style in (PAM_TEXT_INFO, PAM_ERROR_MSG):
+                tty_msg(text)
+                continue
+            if style not in (PAM_PROMPT_ECHO_OFF, PAM_PROMPT_ECHO_ON):
+                return PAM_CONV_ERR
+            if u2f:
+                pin = getpass.getpass(text or "PIN: ")
+                arr[i].resp = libc.strdup(pin.encode())
+            else:
                 arr[i].resp = libc.strdup(pass_bytes)
         resp[0] = arr
         return PAM_SUCCESS
@@ -84,7 +118,7 @@ def main() -> int:
     libpam.pam_acct_mgmt.restype = ctypes.c_int
     libpam.pam_end.argtypes = [PamHandle, ctypes.c_int]
     libpam.pam_end.restype = ctypes.c_int
-    rc = libpam.pam_start(b"project-anthony", user, ctypes.byref(conv), ctypes.byref(pamh))
+    rc = libpam.pam_start(service, user, ctypes.byref(conv), ctypes.byref(pamh))
     if rc == PAM_SUCCESS:
         rc = libpam.pam_authenticate(pamh, 0)
     if rc == PAM_SUCCESS:

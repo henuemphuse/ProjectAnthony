@@ -25,6 +25,8 @@ Environment=LESSSECURE=1
 Environment=HOME=/root
 NoNewPrivileges=yes
 PrivateTmp=yes
+# Removable media is mounted read-only under /run to check a rescue USB.
+# hidraw stays visible so an optional FIDO2 key can be touched on TTY3.
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 RestrictSUIDSGID=yes
