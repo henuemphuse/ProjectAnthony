@@ -289,13 +289,36 @@ execute_system_teardown() {
 
 # Prompt used when the background watchdog detects a crash.
 # Y restores from Timeshift. N asks whether to return to the desktop.
+# State file (written by anthony-monitor): line 1 = CRASH_TRIGGERED,
+# line 2 = one-line summary, remaining lines = short evidence snippet.
+STATE_FILE="/run/project-anthony-state"
 crash_recovery_prompt() {
-    rm -f /run/project-anthony-state
+    local summary="" details=""
+    if [ -f "$STATE_FILE" ]; then
+        summary=$(sed -n '2p' "$STATE_FILE" 2>/dev/null)
+        details=$(tail -n +3 "$STATE_FILE" 2>/dev/null)
+        rm -f "$STATE_FILE"
+    fi
+    if [ -z "$summary" ]; then
+        if [ "$1" = "--crash-prompt" ]; then
+            summary="Test crash prompt (no live watchdog event)"
+        else
+            summary="a system crash"
+        fi
+    fi
+
     clear
     echo "========================================================="
     echo "⚠️  PROJECT ANTHONY: CRASH RECOVERY SHIELD"
     echo "========================================================="
-    echo "Anthony monitor has detected a system crash."
+    echo "Anthony monitor has detected:"
+    echo ""
+    echo "  $summary"
+    if [ -n "$details" ]; then
+        echo ""
+        printf '%s\n' "$details" | sed 's/^/  /'
+    fi
+    echo ""
     echo "Would you like to restore from backup? [y/n]"
     echo "---------------------------------------------------------"
     echo ""
@@ -375,9 +398,8 @@ if [ "$1" != "--run-core-menu" ] && [ "$1" != "--crash-prompt" ] && [ "$1" != "-
 fi
 
 # 🚨 Watchdog intercept: crash flag from the monitor, or an explicit test flag
-STATE_FILE="/run/project-anthony-state"
-if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
-    crash_recovery_prompt
+if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(head -n1 "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
+    crash_recovery_prompt "$1"
 fi
 
 

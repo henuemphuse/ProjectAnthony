@@ -65,8 +65,9 @@ BACKGROUND WATCHDOG:
   oops/panic/hung_task. On a hit it writes a crash flag, restarts TTY3,
   and switches you there.
 
-  The TUI then asks:
-    Anthony monitor has detected a system crash.
+  The TUI then names what tripped the watchdog (kernel oops, display
+  manager failure, or a dead compositor) and prints a short evidence
+  snippet from the journal, then asks:
     Would you like to restore from backup? [y/n]
       y  → Timeshift restore (rolling snapshot, or the full wizard)
       n  → Would you like to return to the desktop? [y/n]
