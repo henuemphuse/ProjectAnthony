@@ -12,10 +12,10 @@ By leveraging native, proven system utilities (`timeshift`, `gddrescue`, `smartc
 
 ## 🔥 Key Enterprise Features
 
-* **⚡ Proactive Background Crash Interceptor:** Runs a highly optimized systemd daemon service that monitors core kernel parameters. In the event of a severe software freeze or segment fault, it automatically switches display focus to a dedicated console recovery screen.
-* **🛡️ Smart Crash Recovery Shield:** If launched immediately following a monitored system failure, the utility bypasses the standard menu layout and deploys an instant y/n prompt layout to execute a single-click restore from your automated backup.
+* **⚡ Proactive Background Crash Interceptor:** Runs a highly optimized systemd daemon that watches for a kernel oops/panic/hung task/segfault, a failed display manager, or a dead compositor under a live graphical login. On a hit it switches to TTY3 and the rescue prompt names the failure and prints a short journal snippet so you can see what crashed.
+* **🛡️ Smart Crash Recovery Shield:** If launched immediately following a monitored system failure, the utility bypasses the standard menu layout, shows the crash type plus evidence, and deploys an instant y/n prompt to restore from your automated backup.
 * **⚡ Lock-Breaking Single-Slot Rolling Update Shield:** Injects a secure pre-invocation hook into the APT package manager. Whenever `apt upgrade` runs or the graphical Update Manager button is clicked, the background subshell forcefully terminates stray backend database instances, clears active file system locks (`/var/run/timeshift.lock`), purges the last update's snapshot, and captures a fresh `SYSTEM_LIFERAFT_ROLLING` snapshot. **Your system storage footprint remains perfectly flat.**
-* **⌨️ Two-Layer Rescue Hotkeys:** `Ctrl+Alt+X` opens the rescue TUI over a living desktop session. `Ctrl+Alt+Del` stays as the stock logout dialog. If the compositor is frozen, `Ctrl+Alt+F3` is a kernel virtual-terminal switch onto the TTY3 rescue console. If the keyboard is stuck in an X grab, `Alt+SysRq+R` then `Ctrl+Alt+F3` unraws it from the kernel ISR.
+* **⌨️ Two-Layer Rescue Hotkeys:** `Ctrl+Alt+X` opens the rescue TUI over a living desktop session. The binder toggles Cinnamon’s custom-keybinding list so the grab actually reloads. `Ctrl+Alt+Del` stays as the stock logout dialog. If the compositor is frozen, `Ctrl+Alt+F3` is a kernel virtual-terminal switch onto the TTY3 rescue console. If the keyboard is stuck in an X grab, `Alt+SysRq+R` then `Ctrl+Alt+F3` unraws it from the kernel ISR. Uninstall runs `project-anthony-bind-hotkeys --unbind` so `Ctrl+Alt+X` is cleared and Cinnamon drops the grab.
 * **📊 Hardware & Kernel Diagnostics:** Provides real-time visibility into motherboard voltage rails (Vcore, 12V, 5V, 3.3V), physical component thermals, and fan controller RPMs, while scanning the core kernel ring buffer for critical hardware allocation errors and panics.
 * **💾 Smart Storage Topography & Diagnostics:** Parses physical disk layers into a clean, column-locked dashboard matching hardware models, exact capacity dimensions, live partition space tracking (`df -h`), and real-time factory SMART health logs (`🟢 PASSED` / `🔴 FAILED!`).
 * **🧼 One-Click Built-in Cleanup:** Includes an explicit self-teardown routine accessible straight from the UI text prompt. Type `u` or `uninstall`, and the script forks a delayed subshell to forcefully strip its own package hooks, daemon services, and custom user hotkey registries completely from system memory.
@@ -31,7 +31,7 @@ ProjectAnthony/
 ├── src/
 │   ├── liferaft.sh                         # Rescue TUI (installed as /usr/local/bin/project-anthony)
 │   ├── project-anthony-tty.sh            # TTY3 wrapper: exec TUI, then a clean root shell
-│   ├── project-anthony-bind-hotkeys.sh   # Cinnamon Ctrl+Alt+X (CAD stays logout)
+│   ├── project-anthony-bind-hotkeys.sh   # Cinnamon Ctrl+Alt+X bind/unbind (CAD stays logout)
 │   ├── project-anthony-show-manual.sh    # Opens packaged README.txt (install / menu / --manual)
 │   ├── anthony-monitor.sh                  # Lightweight crash watchdog daemon
 │   ├── liferaft-autosnap.sh              # Single-slot Timeshift rolling snapshot
@@ -85,7 +85,7 @@ Recovery is two independent entry points, not one program on both layers:
 | Menu / Desktop | — | "Project Anthony Rescue" and "Project Anthony Manual" |
 | Desktop frozen | `Ctrl+Alt+F3` | Kernel VT switch → `project-anthony-tty.service` on TTY3 |
 | Keyboard grabbed | `Alt+SysRq+R`, then F3 | Kernel unraw, then the same TTY3 service |
-| Crash watchdog | (automatic) | `project-anthony-monitor.service` → TTY3 Timeshift y/n prompt |
+| Crash watchdog | (automatic) | `project-anthony-monitor.service` → TTY3 prompt with crash type + journal snippet, then Timeshift y/n |
 
 `Ctrl+Alt+Del` is left as Cinnamon’s stock logout dialog.
 
@@ -123,6 +123,9 @@ project-anthony
 
 # Open the packaged manual
 project-anthony --manual
+
+# Test the watchdog y/n prompt (no live crash required)
+sudo project-anthony --crash-prompt
 ```
 
 ---
@@ -141,7 +144,7 @@ sudo apt remove project-anthony
 
 ## ⚠️ Security Note
 
-TTY3 runs the rescue TUI as root so a frozen machine can still be recovered without a password prompt. Physical console access equals root. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty.
+TTY3 runs the rescue TUI as root so a frozen machine can still be recovered without a password prompt. Physical console access equals root. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty via `project-anthony-bind-hotkeys --unbind`, which also reloads Cinnamon’s custom-keybinding list so the grab is dropped.
 
 ---
 

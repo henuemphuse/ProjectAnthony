@@ -62,12 +62,19 @@ BACKGROUND WATCHDOG:
   project-anthony-monitor.service is a low-priority daemon (nice 19, idle
   I/O, 32 MB cap). Every few seconds it checks for a compositor death
   under a live graphical login, a failed display manager, or a new kernel
-  oops/panic/hung_task. On a hit it writes a crash flag, restarts TTY3,
-  and switches you there.
+  oops/panic/hung_task/segfault. On a hit it writes a crash report (what
+  failed, plus a short journal snippet), restarts TTY3, and switches you
+  there.
 
-  The TUI then names what tripped the watchdog (kernel oops, display
-  manager failure, or a dead compositor) and prints a short evidence
-  snippet from the journal, then asks:
+  The TUI then names what tripped the watchdog and prints the evidence:
+    Kernel oops, panic, hung task, or segfault
+      Comm:/RIP: lines from the kernel journal (which process blew up)
+    Display manager failed
+      Unit name, systemd result, last error lines
+    Desktop compositor died
+      Graphical session still registered, but cinnamon/gnome-shell/kwin
+      is not running
+  Then it asks:
     Would you like to restore from backup? [y/n]
       y  → Timeshift restore (rolling snapshot, or the full wizard)
       n  → Would you like to return to the desktop? [y/n]
@@ -76,6 +83,7 @@ BACKGROUND WATCHDOG:
 
   Test the prompt without a real crash:
     sudo project-anthony --crash-prompt
+    (labels itself as test mode when no live crash was recorded)
 
 COMMAND LINE:
   project-anthony                 Rescue TUI
@@ -88,7 +96,9 @@ SYSTEM ALTERATIONS MADE:
   - Manual opener: /usr/local/bin/project-anthony-show-manual
   - Automated Background Script: Placed into /usr/local/bin/liferaft-autosnap.sh
   - System Package Layer Hook: Injected to /etc/apt/apt.conf.d/99-liferaft-autosnap
-  - Cinnamon Ctrl+Alt+X bound to Project Anthony (Ctrl+Alt+Del stays logout)
+  - Cinnamon Ctrl+Alt+X bound to Project Anthony (Ctrl+Alt+Del stays logout).
+    The binder toggles Cinnamon's custom-list so the grab actually reloads.
+    Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X clears.
   - Menu + Desktop launchers: Project Anthony Rescue and Project Anthony Manual
   - First-run autostart: project-anthony-first-run.desktop (shows this manual if
     dpkg ran without a live graphical session)
@@ -99,7 +109,8 @@ SYSTEM ALTERATIONS MADE:
 SECURITY NOTE:
   TTY3 autologs in as root so a frozen machine can still be recovered
   without a password prompt. Physical console access equals root.
-  Uninstall restores the Cinnamon Ctrl+Alt+X shortcut to empty.
+  Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X is
+  cleared and Cinnamon drops the grab.
 
 =========================================================================
 👉 PRESS [Q] AT ANY TIME TO EXIT
