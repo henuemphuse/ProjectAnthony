@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-informational)]()
-[![Package](https://img.shields.io/badge/package-1.0--2_amd64-blue)]()
+[![Package](https://img.shields.io/badge/package-1.0--3_amd64-blue)]()
 
 **Project Anthony** is an ultra-lightweight, zero-bloat system restoration wrapper and interactive text dashboard designed for Linux clients. Named after the patron saint of lost things, this utility provides an emergency fallback environment to recover systems from corrupt software updates, display server deadlocks, or imminent storage drive failures.
 
@@ -24,7 +24,7 @@ By leveraging native, proven system utilities (`timeshift`, `gddrescue`, `smartc
 
 ## 🗂️ Architectural Blueprint
 
-Source lives in this repo. `./build-deb.sh` copies it into a Debian staging tree and emits the `.deb` under `./build/`. That `build/` tree is generated output, not the source of truth. A sibling folder such as `../ProjectAnthony_1.0-2_amd64/` is an optional staging target for the same builder.
+Source lives in this repo. `./build-deb.sh` copies it into a Debian staging tree and emits the `.deb` under `./build/`. That `build/` tree is generated output, not the source of truth. A sibling folder such as `../ProjectAnthony_1.0-3_amd64/` is an optional staging target for the same builder.
 
 ```text
 ProjectAnthony/
@@ -115,14 +115,14 @@ Project Anthony is distributed as a native Debian installation package for maxim
 Download the latest pre-compiled release from the GitHub Releases dashboard and deploy it via standard system channels:
 
 ```bash
-sudo apt install ./ProjectAnthony_1.0-2_amd64.deb
+sudo apt install ./ProjectAnthony_1.0-3_amd64.deb
 ```
 
 To build that package from this source tree instead:
 
 ```bash
 ./build-deb.sh
-sudo apt install ./build/ProjectAnthony_1.0-2_amd64.deb
+sudo apt install ./build/ProjectAnthony_1.0-3_amd64.deb
 ```
 
 *Note: The package manager will automatically resolve and provision all required backend dependencies (`timeshift`, `gddrescue`, `bc`, `smartmontools`, `lm-sensors`, `gnome-terminal`, `kbd`) seamlessly during this process.*
