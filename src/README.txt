@@ -126,7 +126,7 @@ SYSTEM ALTERATIONS MADE:
     dpkg ran without a live graphical session)
   - TTY3 rescue console: project-anthony-tty.service (getty@tty3 masked)
   - TTY3 password unlock: /usr/local/bin/project-anthony-auth
-    and /etc/pam.d/project-anthony
+    and /etc/pam.d/project-anthony (helper-only PAM gate)
   - Optional USB rescue token: sudo project-anthony-mk-token <usb-mount>
     (not in the TUI; machine stores only a hash in /etc/project-anthony)
   - Optional FIDO2/U2F: sudo apt install libpam-u2f, then
@@ -143,7 +143,8 @@ SECURITY NOTE:
   10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
   fifth failed attempt locks the console until a registered rescue USB
   is inserted (or you reboot; reboot clears the count). The count stays
-  in /run and clears on reboot. There is no root
+  in /run and clears on reboot. TTY3 PAM is not a public password
+  oracle and does not share the desktop account lockout. There is no root
   shell. Watchdog evidence stays in root-only files (crash state and
   system.log). The TUI status flag is only the word ERROR. The TUI does
   not install packages, and disk clones only go to
@@ -170,8 +171,10 @@ FIDO2 / U2F SECURITY KEY (optional, not in the menu):
     sudo project-anthony-mk-token --u2f
     sudo project-anthony-mk-token --u2f alice
     sudo project-anthony-mk-token --u2f-import
-  Each username gets its own key(s). Run --u2f again for another person
-  on a shared workstation, or again for the same person to add a spare.
+  --u2f-import copies keys for that username only (other accounts in
+  the source file are skipped). Each username gets its own key(s).
+  Run --u2f again for another person on a shared workstation, or again
+  for the same person to add a spare.
   After that, TTY3 asks that account to touch a registered key after the
   password. Accounts with no mapping still unlock with password alone.
   Turn it off with: sudo project-anthony-mk-token --u2f-disable

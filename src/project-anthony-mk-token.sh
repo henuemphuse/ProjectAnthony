@@ -31,7 +31,7 @@ usage() {
     echo "FIDO2/U2F security key (optional; password then touch):"
     echo "  sudo apt install libpam-u2f     # once, if you use a key"
     echo "  sudo project-anthony-mk-token --u2f [user]"
-    echo "  sudo project-anthony-mk-token --u2f-import [user]"
+    echo "  sudo project-anthony-mk-token --u2f-import [user]   # that username only"
     echo "  sudo project-anthony-mk-token --u2f-disable"
     echo "  Repeat --u2f for each person on a shared machine, or a spare key."
     echo ""
@@ -146,7 +146,7 @@ u2f_enroll() {
 }
 
 u2f_import() {
-    local user home src line imported=0
+    local user home src line line_user imported=0 skipped=0
     require_pam_u2f
     user=$(pick_user "${1:-}")
     if [ -z "$user" ]; then
@@ -156,7 +156,7 @@ u2f_import() {
     home=$(getent passwd "$user" | cut -d: -f6)
     for src in "${home}/.config/Yubico/u2f_keys" /etc/u2f_mappings; do
         [ -s "$src" ] || continue
-        echo "Importing from $src"
+        echo "Importing from $src (account '$user' only)"
         while IFS= read -r line || [ -n "$line" ]; do
             line=$(printf '%s' "$line" | tr -d '\r')
             [ -n "$line" ] || continue
@@ -165,12 +165,21 @@ u2f_import() {
             esac
             if [[ "$line" != *:* ]]; then
                 line="${user}:${line}"
+            else
+                line_user="${line%%:*}"
+                if [ "$line_user" != "$user" ]; then
+                    skipped=$((skipped + 1))
+                    continue
+                fi
             fi
             if append_u2f_line "$line"; then
                 imported=$((imported + 1))
             fi
         done < "$src"
     done
+    if [ "$skipped" -gt 0 ]; then
+        echo "Skipped $skipped mapping line(s) that named a different account."
+    fi
     if [ "$imported" -eq 0 ]; then
         echo "No existing U2F mappings found for '$user'."
         echo "Enroll a key with: sudo project-anthony-mk-token --u2f $user"

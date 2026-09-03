@@ -1,5 +1,8 @@
 #%PAM-1.0
 # TTY3 rescue unlock. pam_unix only — do not include common-auth / faillock
 # so failed attempts here cannot lock the desktop account.
+# pam_exec refuses every caller except the root helper, so a local process
+# cannot use this service as a faillock-free password oracle.
+auth     required       pam_exec.so quiet /usr/local/lib/project-anthony/restrict-pam-caller
 auth     required       pam_unix.so
 account  required       pam_unix.so

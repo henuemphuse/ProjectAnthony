@@ -35,6 +35,7 @@ install_auth_helper() {
 rm -rf "$DEST"
 mkdir -p "$DEST/DEBIAN" \
   "$DEST/usr/local/bin" \
+  "$DEST/usr/local/lib/project-anthony" \
   "$DEST/usr/share/applications" \
   "$DEST/usr/share/doc/project-anthony" \
   "$DEST/etc/xdg/autostart" \
@@ -52,6 +53,8 @@ cp -f "$ROOT/src/project-anthony-bind-hotkeys.sh" "$DEST/usr/local/bin/project-a
 cp -f "$ROOT/src/liferaft-autosnap.sh" "$DEST/usr/local/bin/liferaft-autosnap.sh"
 cp -f "$ROOT/src/project-anthony-show-manual.sh" "$DEST/usr/local/bin/project-anthony-show-manual"
 cp -f "$ROOT/src/project-anthony-mk-token.sh" "$DEST/usr/local/bin/project-anthony-mk-token"
+cp -f "$ROOT/src/project-anthony-restrict-pam-caller.sh" \
+  "$DEST/usr/local/lib/project-anthony/restrict-pam-caller"
 cp -f "$ROOT/src/README.txt" "$DEST/usr/share/doc/project-anthony/README.txt"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/LICENSE"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/copyright"
@@ -70,7 +73,8 @@ chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony-bind-hotkeys" \
   "$DEST/usr/local/bin/liferaft-autosnap.sh" \
   "$DEST/usr/local/bin/project-anthony-show-manual" \
-  "$DEST/usr/local/bin/project-anthony-mk-token"
+  "$DEST/usr/local/bin/project-anthony-mk-token" \
+  "$DEST/usr/local/lib/project-anthony/restrict-pam-caller"
 chmod 700 "$DEST/usr/local/bin/project-anthony-auth"
 chmod 644 "$DEST/DEBIAN/control" \
   "$DEST/etc/pam.d/project-anthony" \

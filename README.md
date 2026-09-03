@@ -34,6 +34,7 @@ ProjectAnthony/
 │   ├── project-anthony-bind-hotkeys.sh   # Cinnamon Ctrl+Alt+X bind/unbind (CAD stays logout)
 │   ├── project-anthony-auth.c            # PAM password check for TTY3 unlock
 │   ├── project-anthony-auth.py           # Fallback helper if gcc is unavailable
+│   ├── project-anthony-restrict-pam-caller.sh  # PAM gate: helper-only caller
 │   ├── project-anthony-show-manual.sh    # Opens packaged README.txt (install / menu / --manual)
 │   ├── project-anthony-mk-token.sh       # USB rescue token (root CLI only; not in the TUI)
 │   ├── anthony-monitor.sh                  # Lightweight crash watchdog daemon
@@ -69,6 +70,7 @@ Runtime paths after `dpkg -i`:
 /usr/local/bin/project-anthony-bind-hotkeys
 /usr/local/bin/project-anthony-show-manual
 /usr/local/bin/project-anthony-auth
+/usr/local/lib/project-anthony/restrict-pam-caller
 /usr/local/bin/project-anthony-mk-token
 /usr/local/bin/liferaft-autosnap.sh
 /lib/systemd/system/project-anthony-tty.service
@@ -158,7 +160,7 @@ sudo apt remove project-anthony
 
 ## ⚠️ Security Note
 
-TTY3 still runs as root so a frozen machine can be recovered, but the rescue menu and crash-restore prompt stay locked until a local account password is accepted (your desktop user by default). After unlock, 60 seconds of idle at a prompt relocks the console (password required again). Failed unlocks wait 10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the fifth failed attempt locks the console until a registered rescue USB is inserted (reboot also clears the count in `/run`). Create that USB from a working desktop with `sudo project-anthony-mk-token /media/YOU/USBNAME` — it is not in the rescue menu. The machine stores only a SHA-256 of `project-anthony.rescue`; `--revoke` invalidates every copy. FIDO2/U2F is optional and off until you install `libpam-u2f` and run `sudo project-anthony-mk-token --u2f` (or `--u2f-import`); enrolled accounts then touch a registered key after the password. Repeat `--u2f alice` / `--u2f bob` for a shared workstation, or the same username again for a spare key. `--u2f-disable` turns it off. There is no root shell. Watchdog evidence stays in root-only files (`/run/project-anthony-state`, `/var/log/project-anthony/system.log`); the TUI OK/error flag is world-readable and contains only the word `ERROR`. The TUI will not install packages, will not let `less` spawn a shell, and will only clone to another disk or a folder under `/mnt`, `/media`, `/root`, or `/home`. Type `desktop` at the user prompt to leave without unlocking. Returning to the desktop ends that unlock; the next F3 asks again. Magic SysRq is limited to keyboard unraw (`kernel.sysrq = 16`). `Ctrl+Alt+X` on a living desktop still runs as your user and uses sudo for privileged tools. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty via `project-anthony-bind-hotkeys --unbind`.
+TTY3 still runs as root so a frozen machine can be recovered, but the rescue menu and crash-restore prompt stay locked until a local account password is accepted (your desktop user by default). After unlock, 60 seconds of idle at a prompt relocks the console (password required again). Failed unlocks wait 10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the fifth failed attempt locks the console until a registered rescue USB is inserted (reboot also clears the count in `/run`). Create that USB from a working desktop with `sudo project-anthony-mk-token /media/YOU/USBNAME` — it is not in the rescue menu. The machine stores only a SHA-256 of `project-anthony.rescue`; `--revoke` invalidates every copy. The TTY3 PAM service is helper-only (not a public password oracle) and does not share the desktop account lockout, so guessing on F3 cannot lock you out of Cinnamon. FIDO2/U2F is optional and off until you install `libpam-u2f` and run `sudo project-anthony-mk-token --u2f` (or `--u2f-import`); enrolled accounts then touch a registered key after the password. Repeat `--u2f alice` / `--u2f bob` for a shared workstation, or the same username again for a spare key. `--u2f-import` copies keys for that username only. `--u2f-disable` turns it off. There is no root shell. Watchdog evidence stays in root-only files (`/run/project-anthony-state`, `/var/log/project-anthony/system.log`); the TUI OK/error flag is world-readable and contains only the word `ERROR`. The TUI will not install packages, will not let `less` spawn a shell, and will only clone to another disk or a folder under `/mnt`, `/media`, `/root`, or `/home`. Type `desktop` at the user prompt to leave without unlocking. Returning to the desktop ends that unlock; the next F3 asks again. Magic SysRq is limited to keyboard unraw (`kernel.sysrq = 16`). `Ctrl+Alt+X` on a living desktop still runs as your user and uses sudo for privileged tools. Uninstall restores the Cinnamon `Ctrl+Alt+X` shortcut to empty via `project-anthony-bind-hotkeys --unbind`.
 
 ---
 
