@@ -592,6 +592,8 @@ execute_system_teardown() {
         rm -f /usr/local/bin/project-anthony-show-manual
         rm -f /usr/local/bin/project-anthony-auth
         rm -f /usr/local/bin/project-anthony-mk-token
+        rm -f /usr/local/lib/project-anthony/restrict-pam-caller
+        rmdir /usr/local/lib/project-anthony 2>/dev/null || true
         rm -f /etc/pam.d/project-anthony
         rm -f /etc/pam.d/project-anthony-u2f
         rm -f /usr/share/applications/project-anthony.desktop

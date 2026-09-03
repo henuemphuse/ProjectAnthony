@@ -33,6 +33,10 @@ install_auth_helper() {
         echo "✔ Installed PAM console-unlock helper (python fallback)."
     fi
     chmod 700 "$dest_bin"
+    mkdir -p /usr/local/lib/project-anthony
+    cp -f "$SRC_DIR/project-anthony-restrict-pam-caller.sh" \
+        /usr/local/lib/project-anthony/restrict-pam-caller
+    chmod 755 /usr/local/lib/project-anthony/restrict-pam-caller
     chmod 644 "$dest_pam" /etc/pam.d/project-anthony-u2f
 }
 
