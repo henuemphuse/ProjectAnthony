@@ -53,11 +53,11 @@ crash_recovery_prompt() {
         echo "🚀 Opening Timeshift restore..."
         SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
         if [ -n "$SYSTEM_SNAP_ID" ]; then
-            sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
+            run_priv timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
         else
             echo "❌ SYSTEM_LIFERAFT_ROLLING recovery point not found."
             echo "Opening the full Timeshift restore wizard instead..."
-            sudo timeshift --restore
+            run_priv timeshift --restore
         fi
         tui_read fakeKey "Press [Enter] to continue..."
         return 0

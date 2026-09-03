@@ -52,7 +52,7 @@ storage_matrix_menu() {
             fi
         fi
 
-        SMART_RAW=$(sudo smartctl -H "/dev/$disk" 2>/dev/null)
+        SMART_RAW=$(run_priv smartctl -H "/dev/$disk" 2>/dev/null)
         if echo "$SMART_RAW" | grep -q "PASSED"; then HEALTH="🟢 PASSED"
         elif echo "$SMART_RAW" | grep -q "FAILED"; then HEALTH="🔴 FAILED!"
         elif echo "$SMART_RAW" | grep -q "OK"; then HEALTH="🟢 OK"
@@ -125,7 +125,7 @@ storage_matrix_menu() {
         else
             RESCUE_LOG="${HOME:-/tmp}/${drive_choice}_rescue.log"
         fi
-        sudo ddrescue -v -b 4096 "$SRC_PATH" "$DEST_PATH" "$RESCUE_LOG"
+        run_priv ddrescue -v -b 4096 "$SRC_PATH" "$DEST_PATH" "$RESCUE_LOG"
         echo "✔ Sector streaming complete."
     else
         echo "❌ Migration execution cancelled."
