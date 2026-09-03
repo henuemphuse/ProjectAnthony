@@ -85,14 +85,25 @@ gsettings_on_bus() {
     uid=$(id -u "$u" 2>/dev/null) || return 0
     home=$(getent passwd "$u" | cut -d: -f6)
     bus="unix:path=/run/user/${uid}/bus"
-    sudo -u "$u" env \
-        HOME="${home:-/home/$u}" \
-        USER="$u" \
-        LOGNAME="$u" \
-        DBUS_SESSION_BUS_ADDRESS="$bus" \
-        XDG_RUNTIME_DIR="/run/user/${uid}" \
-        DISPLAY="${DISPLAY:-:0}" \
-        gsettings "$@"
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$u" -- env \
+            HOME="${home:-/home/$u}" \
+            USER="$u" \
+            LOGNAME="$u" \
+            DBUS_SESSION_BUS_ADDRESS="$bus" \
+            XDG_RUNTIME_DIR="/run/user/${uid}" \
+            DISPLAY="${DISPLAY:-:0}" \
+            gsettings "$@"
+    else
+        sudo -u "$u" env \
+            HOME="${home:-/home/$u}" \
+            USER="$u" \
+            LOGNAME="$u" \
+            DBUS_SESSION_BUS_ADDRESS="$bus" \
+            XDG_RUNTIME_DIR="/run/user/${uid}" \
+            DISPLAY="${DISPLAY:-:0}" \
+            gsettings "$@"
+    fi
 }
 
 apply_for_user() {
@@ -107,7 +118,11 @@ apply_for_user() {
             apply_bindings
         fi
     else
-        sudo -u "$u" dbus-run-session -- "$0" ${UNBIND:+--unbind} || true
+        if [ "$(id -u)" -eq 0 ]; then
+            runuser -u "$u" -- dbus-run-session -- "$0" ${UNBIND:+--unbind} || true
+        else
+            sudo -u "$u" dbus-run-session -- "$0" ${UNBIND:+--unbind} || true
+        fi
     fi
 }
 

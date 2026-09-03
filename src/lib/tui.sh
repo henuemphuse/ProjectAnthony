@@ -115,7 +115,7 @@ show_system_logs() {
 
 rolling_snapshot_id() {
     local id
-    id=$(sudo timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+    id=$(run_priv timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
     [[ "$id" =~ ^[0-9A-Za-z._-]+$ ]] || return 1
     printf '%s\n' "$id"
 }
@@ -163,7 +163,7 @@ desktop_reinit_menu() {
                     [ -n "$local_uid" ] && [ -S "/run/user/${local_uid}/bus" ] && local_dbus="unix:path=/run/user/${local_uid}/bus"
                     # stdin MUST be /dev/null or cinnamon inherits this TTY and eats Enter.
                     if [ "$(id -u)" -eq 0 ] && [ -n "$local_user" ] && [ "$local_user" != "root" ]; then
-                        sudo -u "$local_user" env \
+                        run_as_user "$local_user" env \
                             DISPLAY="$local_display" \
                             ${local_auth:+XAUTHORITY="$local_auth"} \
                             ${local_dbus:+DBUS_SESSION_BUS_ADDRESS="$local_dbus"} \
@@ -186,7 +186,7 @@ desktop_reinit_menu() {
                 tui_read confirm_reset "Are you sure you want to completely reload LightDM? [y/n]: "
                 if [ "$confirm_reset" == "y" ] || [ "$confirm_reset" == "Y" ]; then
                     echo "🚀 Restarting LightDM Display Manager..."
-                    sudo systemctl restart display-manager
+                    run_priv systemctl restart display-manager
                 else
                     echo "❌ Reset sequence aborted."
                     tui_read fakeKey "Press [Enter] key to continue..."
@@ -216,14 +216,14 @@ timeshift_restore_menu() {
         if [ "$quick_choice" == "x" ] || [ "$quick_choice" == "X" ]; then escape_to_desktop; return; fi
         if [ "$quick_choice" == "y" ] || [ "$quick_choice" == "Y" ]; then
             echo "🚀 Initiating instant rollback to snapshot $SYSTEM_SNAP_ID..."
-            sudo timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
+            run_priv timeshift --restore --snapshot "$SYSTEM_SNAP_ID"
             tui_read fakeKey "Press [Enter] key to continue..."
             return
         fi
     fi
 
     echo "📋 Opening full snapshot selection wizard..."
-    sudo timeshift --restore
+    run_priv timeshift --restore
     tui_read fakeKey "Press [Enter] key to continue..."
 }
 
@@ -244,7 +244,7 @@ hardware_diagnostics() {
     echo ""
     echo "🧠 Core Kernel Alerts & Hardware Allocations (Last 5 Alerts):"
     echo "-------------------------------------------------------------------------"
-    sudo dmesg -T | grep -Ei "error|fail|panic|corrupt|kill|hardware" | tail -n 5 || echo "✔ Kernel reports clean hardware allocations."
+    run_priv dmesg -T | grep -Ei "error|fail|panic|corrupt|kill|hardware" | tail -n 5 || echo "✔ Kernel reports clean hardware allocations."
     echo "-------------------------------------------------------------------------"
     echo ""
     echo "👉 Press [Enter] to return or [x] to exit straight to desktop"

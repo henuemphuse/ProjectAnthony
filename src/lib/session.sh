@@ -6,12 +6,33 @@ desktop_users() {
     getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home\// {print $1}'
 }
 
+# TTY3 is already root. systemd NoNewPrivileges + RestrictSUIDSGID make
+# exec of setuid /usr/bin/sudo fail with "Operation not permitted".
+# Ctrl+Alt+X still runs as the desktop user and needs sudo.
+run_priv() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+run_as_user() {
+    local user="$1"
+    shift
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$user" -- "$@"
+    else
+        sudo -u "$user" "$@"
+    fi
+}
+
 gsettings_as() {
     local user="$1"
     shift
     local uid
     uid=$(id -u "$user" 2>/dev/null) || return 0
-    sudo -u "$user" env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" gsettings "$@" 2>/dev/null || true
+    run_as_user "$user" env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" gsettings "$@" 2>/dev/null || true
 }
 
 # Numeric VT from a loginctl TTY string ("tty8", "/dev/tty8") or a raw digit.
