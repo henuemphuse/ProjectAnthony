@@ -7,19 +7,21 @@
 #
 # Usage:
 #   ./build-deb.sh
-#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-1_amd64
+#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-2_amd64
 # =========================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PKG_NAME="ProjectAnthony_1.0-1_amd64"
+PKG_NAME="ProjectAnthony_1.0-2_amd64"
 DEST="${1:-"$ROOT/build/$PKG_NAME"}"
 OUT_DEB="$(dirname "$DEST")/${PKG_NAME}.deb"
 
 install_auth_helper() {
-    local dest_bin="$1" dest_pam="$2" pamlib=""
+    local dest_bin="$1" dest_pam="$2" pamlib="" dest_u2f
+    dest_u2f="$(dirname "$dest_pam")/project-anthony-u2f"
     mkdir -p "$(dirname "$dest_bin")" "$(dirname "$dest_pam")"
     cp -f "$ROOT/packaging/project-anthony.pam" "$dest_pam"
+    cp -f "$ROOT/packaging/project-anthony-u2f.pam" "$dest_u2f"
     pamlib=$(ls /lib/*/libpam.so.0 /usr/lib/*/libpam.so.0 2>/dev/null | head -n1 || true)
     if command -v gcc >/dev/null && [ -n "$pamlib" ]; then
         gcc -O2 -s -o "$dest_bin" "$ROOT/src/project-anthony-auth.c" "$pamlib"
@@ -27,7 +29,7 @@ install_auth_helper() {
         cp -f "$ROOT/src/project-anthony-auth.py" "$dest_bin"
     fi
     chmod 700 "$dest_bin"
-    chmod 644 "$dest_pam"
+    chmod 644 "$dest_pam" "$dest_u2f"
 }
 
 rm -rf "$DEST"
@@ -49,6 +51,7 @@ cp -f "$ROOT/src/project-anthony-tty.sh" "$DEST/usr/local/bin/project-anthony-tt
 cp -f "$ROOT/src/project-anthony-bind-hotkeys.sh" "$DEST/usr/local/bin/project-anthony-bind-hotkeys"
 cp -f "$ROOT/src/liferaft-autosnap.sh" "$DEST/usr/local/bin/liferaft-autosnap.sh"
 cp -f "$ROOT/src/project-anthony-show-manual.sh" "$DEST/usr/local/bin/project-anthony-show-manual"
+cp -f "$ROOT/src/project-anthony-mk-token.sh" "$DEST/usr/local/bin/project-anthony-mk-token"
 cp -f "$ROOT/src/README.txt" "$DEST/usr/share/doc/project-anthony/README.txt"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/LICENSE"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/copyright"
@@ -66,10 +69,12 @@ chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony-tty" \
   "$DEST/usr/local/bin/project-anthony-bind-hotkeys" \
   "$DEST/usr/local/bin/liferaft-autosnap.sh" \
-  "$DEST/usr/local/bin/project-anthony-show-manual"
+  "$DEST/usr/local/bin/project-anthony-show-manual" \
+  "$DEST/usr/local/bin/project-anthony-mk-token"
 chmod 700 "$DEST/usr/local/bin/project-anthony-auth"
 chmod 644 "$DEST/DEBIAN/control" \
   "$DEST/etc/pam.d/project-anthony" \
+  "$DEST/etc/pam.d/project-anthony-u2f" \
   "$DEST/usr/share/applications/project-anthony.desktop" \
   "$DEST/usr/share/applications/project-anthony-manual.desktop" \
   "$DEST/etc/xdg/autostart/project-anthony-hotkeys.desktop" \

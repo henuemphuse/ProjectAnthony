@@ -2,16 +2,24 @@
 # =========================================================================
 #   PROJECT ANTHONY: LIGHTWEIGHT CRASH WATCHDOG
 # =========================================================================
-# Polls cheap kernel/session signals. On a new crash, switches to TTY3
-# and lets getty launch the rescue TUI at the Timeshift restore prompt.
+# Polls cheap kernel/session signals.
+#
+# Real desktop/kernel deaths still switch to TTY3 for the Timeshift prompt.
+# Faults in this watchdog (or its own truncated kernel comm) are logged
+# instead, and the TUI "System logs" row shows error until they are read.
 # =========================================================================
 
 STATE_FILE="/run/project-anthony-state"
 CURSOR_FILE="/run/project-anthony-monitor.cursor"
+ALERT_FILE="/run/project-anthony-log-alert"
+RATE_FILE="/run/project-anthony-log-ratelimit"
+LOG_DIR="/var/log/project-anthony"
+LOG_FILE="$LOG_DIR/system.log"
 POLL_SEC=4
 BOOT_GRACE_SEC=45
 STARTED_AT="$(date +%s)"
-# State/cursor files are root-only. Random local UIDs must not read crash evidence.
+# State/cursor/log files are root-only. The alert flag is world-readable on
+# purpose: it is only the token "ERROR", never crash evidence.
 umask 077
 
 wm_running() {
@@ -50,8 +58,17 @@ compositor_dead() {
 }
 
 # Kernel faults only. Userspace "segfault at" lines are omitted so a crashing
-# app cannot steal the physical console onto the passwordless TTY3 TUI.
+# app cannot steal the physical console onto the TTY3 TUI.
 KERNEL_FAULT_RE='Oops:|kernel panic|BUG: unable to handle|hung_task|soft lockup|hard LOCKUP'
+
+# TASK_COMM_LEN is 15 chars. project-anthony-monitor and -tty both become
+# "project-anthony". Never treat those as a reason to hijack the console.
+is_our_comm() {
+    case "$1" in
+        project-anthony*) return 0 ;;
+    esac
+    return 1
+}
 
 # TTY-safe, short evidence block (8 x 76). Control chars stripped.
 sanitize_report() {
@@ -62,14 +79,72 @@ sanitize_report() {
         | head -n 8
 }
 
+# One short record: stamp, kind, a few evidence lines. Not a journal dump.
+MAX_LOG_RECORDS=12
+MAX_LOG_RECORD_LINES=7
+sanitize_log_record() {
+    tr -cd '\11\12\15\40-\176' \
+        | cut -c1-76 \
+        | head -n "$MAX_LOG_RECORD_LINES"
+}
+
 cursor_since() {
     cat "$CURSOR_FILE" 2>/dev/null || echo "@0"
 }
 
+bump_cursor() {
+    date --iso-8601=seconds > "$CURSOR_FILE" 2>/dev/null || true
+    chmod 600 "$CURSOR_FILE" 2>/dev/null || true
+}
+
+kernel_snippet() {
+    journalctl -k -q --since "$(cursor_since)" --no-pager 2>/dev/null || true
+}
+
+# Comm: lines, hung_task "task name:pid", soft-lockup "[name:pid]".
+fault_comms_from() {
+    printf '%s\n' "$1" | sed -n \
+        -e 's/.*Comm: \([^[:space:]]*\).*/\1/p' \
+        -e 's/.*[[:space:]]task \([^:[:space:]]*\):[0-9][0-9]*.*/\1/p' \
+        -e 's/.*\[\([^][:space:]]*\):[0-9][0-9]*\].*/\1/p' \
+        | grep -v '^$' | sort -u
+}
+
+comms_all_ours() {
+    local line any=0
+    [ -n "$1" ] || return 1
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        any=1
+        is_our_comm "$line" || return 1
+    done < <(printf '%s\n' "$1")
+    [ "$any" -eq 1 ]
+}
+
+kernel_has_fault_line() {
+    printf '%s\n' "$1" | grep -Eiq "$KERNEL_FAULT_RE"
+}
+
+# Foreign (or unattributed) kernel fault: still a rescue-worthy crash.
 kernel_fault() {
-    journalctl -k -q --since "$(cursor_since)" --no-pager 2>/dev/null \
-        | grep -Ei "$KERNEL_FAULT_RE" \
-        | grep -q .
+    local snippet comms
+    snippet=$(kernel_snippet)
+    kernel_has_fault_line "$snippet" || return 1
+    comms=$(fault_comms_from "$snippet")
+    if [ -z "$comms" ]; then
+        return 0
+    fi
+    comms_all_ours "$comms" && return 1
+    return 0
+}
+
+# Attributed kernel fault whose every comm is this program. Log, do not chvt.
+kernel_self_fault() {
+    local snippet comms
+    snippet=$(kernel_snippet)
+    kernel_has_fault_line "$snippet" || return 1
+    comms=$(fault_comms_from "$snippet")
+    comms_all_ours "$comms"
 }
 
 display_manager_failed() {
@@ -113,6 +188,78 @@ compositor_dead_report() {
     } | sanitize_report
 }
 
+# World-readable flag only. Evidence stays in the 0600 log and state file.
+raise_alert() {
+    printf 'ERROR\n' > "$ALERT_FILE" 2>/dev/null || true
+    chmod 644 "$ALERT_FILE" 2>/dev/null || true
+}
+
+rate_limit_ok() {
+    local now last
+    now=$(date +%s)
+    last=$(cat "$RATE_FILE" 2>/dev/null || echo 0)
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    if [ $((now - last)) -lt 120 ]; then
+        return 1
+    fi
+    echo "$now" > "$RATE_FILE" 2>/dev/null || true
+    chmod 600 "$RATE_FILE" 2>/dev/null || true
+    return 0
+}
+
+# Keep only the last MAX_LOG_RECORDS blocks (lines starting with ===).
+trim_system_log() {
+    local n
+    [ -f "$LOG_FILE" ] || return 0
+    n=$(grep -c '^===' "$LOG_FILE" 2>/dev/null || echo 0)
+    [[ "$n" =~ ^[0-9]+$ ]] || return 0
+    [ "$n" -gt "$MAX_LOG_RECORDS" ] || return 0
+    awk -v max="$MAX_LOG_RECORDS" '
+        /^=== / { rec++ }
+        { buf[rec] = buf[rec] $0 "\n" }
+        END {
+            start = rec - max + 1
+            if (start < 1) start = 1
+            for (i = start; i <= rec; i++) printf "%s", buf[i]
+        }
+    ' "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null || return 0
+    mv -f "${LOG_FILE}.tmp" "$LOG_FILE" 2>/dev/null || true
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+}
+
+# kind = CRASH (history only; TTY3 is the notification) or
+# WATCHDOG/INTERNAL (raise the TUI error flag, rate-limited).
+# Never abort the daemon from a log write failure.
+log_event() {
+    local kind="$1"
+    local summary="$2"
+    local detail="$3"
+    local stamp
+
+    if [ "$kind" != "CRASH" ]; then
+        raise_alert
+        if ! rate_limit_ok; then
+            return 0
+        fi
+    fi
+
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+    chmod 700 "$LOG_DIR" 2>/dev/null || true
+
+    stamp=$(date --iso-8601=seconds 2>/dev/null || date)
+    {
+        echo "=== ${stamp} ==="
+        echo "${kind}: ${summary}"
+        [ -n "$detail" ] && printf '%s\n' "$detail"
+        echo ""
+    } | sanitize_log_record >> "$LOG_FILE" 2>/dev/null || {
+        logger -t project-anthony-monitor "Failed to write $LOG_FILE"
+        return 0
+    }
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+    trim_system_log
+}
+
 # Cheap boolean check first; gather details only when we actually trip.
 collect_crash_report() {
     CRASH_SUMMARY=""
@@ -135,6 +282,23 @@ collect_crash_report() {
     return 1
 }
 
+handle_self_fault() {
+    local detail
+    detail=$(kernel_fault_report)
+    [ -z "$detail" ] && detail="No kernel snippet (watchdog internal error)."
+    log_event "WATCHDOG" "Fault in Project Anthony itself — TTY3 was not taken." "$detail"
+    logger -t project-anthony-monitor "Self-fault logged; not switching to TTY3"
+}
+
+record_systemd_restart_if_any() {
+    local n
+    n=$(systemctl show project-anthony-monitor.service -p NRestarts --value 2>/dev/null || echo 0)
+    [[ "$n" =~ ^[0-9]+$ ]] || return 0
+    [ "$n" -gt 0 ] || return 0
+    log_event "INTERNAL" "Monitor was restarted by systemd (NRestarts=${n}). Console was not taken."
+    logger -t project-anthony-monitor "Monitor restarted by systemd (NRestarts=${n}); logged, not switching to TTY3"
+}
+
 trigger_rescue() {
     if [ -f "$STATE_FILE" ]; then
         chvt 3 2>/dev/null || true
@@ -148,6 +312,7 @@ trigger_rescue() {
         printf '%s\n' "$CRASH_DETAIL"
     } > "$STATE_FILE"
     chmod 600 "$STATE_FILE" 2>/dev/null || true
+    log_event "CRASH" "$CRASH_SUMMARY" "$CRASH_DETAIL"
     logger -t project-anthony-monitor "Crash detected ($CRASH_SUMMARY) — switching to TTY3 Timeshift rescue prompt"
     if [ -n "$CRASH_DETAIL" ]; then
         logger -t project-anthony-monitor "$(printf '%s' "$CRASH_DETAIL" | tr '\n' '|' )"
@@ -158,9 +323,9 @@ trigger_rescue() {
 
 # Ignore kernel messages that already existed before this daemon started.
 # chmod after write: overwriting an old 644 file keeps its mode.
-date --iso-8601=seconds > "$CURSOR_FILE"
-chmod 600 "$CURSOR_FILE" 2>/dev/null || true
+bump_cursor
 [ -f "$STATE_FILE" ] && chmod 600 "$STATE_FILE" 2>/dev/null || true
+record_systemd_restart_if_any
 LATCHED=0
 
 while true; do
@@ -174,9 +339,11 @@ while true; do
         if [ "$LATCHED" -eq 0 ]; then
             trigger_rescue
             LATCHED=1
-            date --iso-8601=seconds > "$CURSOR_FILE"
-            chmod 600 "$CURSOR_FILE" 2>/dev/null || true
+            bump_cursor
         fi
+    elif kernel_self_fault; then
+        handle_self_fault
+        bump_cursor
     else
         LATCHED=0
     fi

@@ -57,6 +57,10 @@ CORE OVERVIEW FUNCTIONS:
   4. Hardware & Kernel Diagnostics: Displays real-time motherboard rail
      voltages, thermals, and fan RPMs while pulling critical hardware-level
      error logs straight from the Linux kernel ring buffer.
+  5. System logs: Menu option 6 shows OK or error. Error means the
+     watchdog logged a self-fault without taking the console. Opening
+     it prints a static snapshot of the last 12 short records, not a
+     live kernel feed. Evidence is root-only; opening clears the flag.
 
 BACKGROUND WATCHDOG:
   project-anthony-monitor.service is a low-priority daemon (nice 19, idle
@@ -66,6 +70,23 @@ BACKGROUND WATCHDOG:
   failed, plus a short journal snippet), restarts TTY3, and switches you
   there. TTY3 asks for a local account password before the crash prompt
   or the rescue menu. Returning to the desktop locks it again.
+
+  If the fault is in Project Anthony itself (kernel comm truncated to
+  project-anthony, or systemd restarted the monitor), the watchdog does
+  not steal the console. It appends a sanitized record to a root-only
+  log and raises a one-word status flag. Open the TUI and use:
+    6. System logs (status: OK)
+    6. System logs (status: error)
+  "error" means the watchdog logged a self-fault or its own restart
+  (the console was not taken). Opening option 6 prints a static
+  snapshot of at most the last 12 short records — it does not follow
+  the kernel journal or stream live crash data. Opening clears the
+  flag; [c] deletes the log. Rescue trips are also appended for
+  history but do not set the flag (TTY3 already notified you). The
+  log lives at /var/log/project-anthony/system.log (mode 600,
+  directory 700). The flag is /run/project-anthony-log-alert (mode
+  644, contents: ERROR). Random local users can see OK vs error,
+  not the evidence.
 
   The TUI then names what tripped the watchdog and prints the evidence:
     Kernel oops, panic, or hung task
@@ -106,19 +127,55 @@ SYSTEM ALTERATIONS MADE:
   - TTY3 rescue console: project-anthony-tty.service (getty@tty3 masked)
   - TTY3 password unlock: /usr/local/bin/project-anthony-auth
     and /etc/pam.d/project-anthony
+  - Optional USB rescue token: sudo project-anthony-mk-token <usb-mount>
+    (not in the TUI; machine stores only a hash in /etc/project-anthony)
+  - Optional FIDO2/U2F: sudo apt install libpam-u2f, then
+    sudo project-anthony-mk-token --u2f  (or --u2f-import)
   - Magic SysRq unraw only (kernel.sysrq=16) via /etc/sysctl.d/99-project-anthony-sysrq.conf
   - Crash watchdog: project-anthony-monitor.service (enabled at install)
+  - Watchdog / system log: /var/log/project-anthony/system.log (root-only)
 
 SECURITY NOTE:
   TTY3 still runs as root so a frozen machine can be recovered, but the
   menu and crash-restore prompt stay locked until a local account
-  password is accepted (your desktop user by default). There is no root
-  shell. The TUI does not install packages, and disk clones only go to
+  password is accepted (your desktop user by default). After unlock,
+  60 seconds idle at a prompt relocks the console. Failed unlocks wait
+  10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
+  fifth failed attempt locks the console until a registered rescue USB
+  is inserted (or you reboot; reboot clears the count). The count stays
+  in /run and clears on reboot. There is no root
+  shell. Watchdog evidence stays in root-only files (crash state and
+  system.log). The TUI status flag is only the word ERROR. The TUI does
+  not install packages, and disk clones only go to
   another disk or a folder under /mnt, /media, /root, or /home.
   Type 'desktop' at the user prompt to leave without unlocking.
   Next F3 asks again. Magic SysRq is keyboard unraw only (sysrq = 16).
   Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X is
   cleared and Cinnamon drops the grab.
+
+RESCUE USB TOKEN (optional, not in the menu):
+  From a working desktop, mount a USB stick and run:
+    sudo project-anthony-mk-token /media/YOU/USBNAME
+  That writes project-anthony.rescue onto the stick and stores only a
+  SHA-256 hash on the machine. On the fifth failed TTY3 password the
+  console stays locked until you plug that stick in (a match unlocks).
+  Copy the file to extra sticks if you want backups. Revoke with:
+    sudo project-anthony-mk-token --revoke
+  If you never create a token, the fifth failure stays locked until reboot.
+
+FIDO2 / U2F SECURITY KEY (optional, not in the menu):
+  Only if you already use a hardware key (YubiKey-style). Install the
+  PAM module, then enroll or import from a working desktop:
+    sudo apt install libpam-u2f
+    sudo project-anthony-mk-token --u2f
+    sudo project-anthony-mk-token --u2f alice
+    sudo project-anthony-mk-token --u2f-import
+  Each username gets its own key(s). Run --u2f again for another person
+  on a shared workstation, or again for the same person to add a spare.
+  After that, TTY3 asks that account to touch a registered key after the
+  password. Accounts with no mapping still unlock with password alone.
+  Turn it off with: sudo project-anthony-mk-token --u2f-disable
+  PKCS#11 smart cards are not used; this is FIDO2/U2F only.
 
 =========================================================================
 👉 PRESS [Q] AT ANY TIME TO EXIT
