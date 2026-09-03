@@ -264,12 +264,54 @@ open_packaged_manual() {
     fi
 }
 
+# After a successful desktop uninstall: y closes the window, n drops to a
+# shell in this terminal. TTY3 never reaches here (teardown chvt+exits).
+after_uninstall_prompt() {
+    echo ""
+    echo "✔ Project Anthony has been removed from this system."
+    while true; do
+        tui_read leave_choice "Exit to desktop? [y/n]: "
+        case "$leave_choice" in
+            y|Y)
+                exit 0
+                ;;
+            n|N)
+                echo ""
+                echo "Dropping to a terminal. Type 'exit' to close this window."
+                cd "${HOME:-/}" 2>/dev/null || cd / || true
+                exec "${SHELL:-/bin/bash}" -i
+                echo "Could not start a shell."
+                tui_read fakeKey "Press [Enter] to close..."
+                exit 0
+                ;;
+            *)
+                echo "Please enter y or n."
+                ;;
+        esac
+    done
+}
+
 confirm_and_uninstall() {
     echo "⚠️  Initiating built-in system uninstallation sequence..."
     tui_read confirm_ui_wipe "Are you absolutely sure you want to delete Project Anthony? [y/n]: "
     if [[ "$confirm_ui_wipe" == "y" || "$confirm_ui_wipe" == "Y" ]]; then
-        pa_source uninstall.sh
-        execute_system_teardown
+        # Desktop shortcut / Ctrl+Alt+X run as the logged-in user. Teardown
+        # needs root; calling it in-process used to `exit 1` and close the TUI.
+        if [ "$(id -u)" -ne 0 ]; then
+            echo ""
+            echo "Administrator privileges are required to uninstall."
+            echo ""
+            if ! sudo /usr/local/bin/project-anthony --uninstall; then
+                echo ""
+                echo "❌ Uninstall cancelled or failed. Returning to dashboard..."
+                tui_read fakeKey "Press [Enter] to continue..."
+                return
+            fi
+        else
+            pa_source uninstall.sh
+            execute_system_teardown
+        fi
+        after_uninstall_prompt
     else
         echo "❌ Action cancelled. Returning to dashboard..."
         sleep 1

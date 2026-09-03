@@ -1,8 +1,52 @@
 # Sourced by /usr/local/bin/project-anthony. Not a standalone program.
 # Integrated self-cleanup. Invoked as `project-anthony --uninstall` (dpkg
 # prerm, uninstall.sh, TUI `u`). Requires root; does not skip TTY3 auth
-# when reached from the menu (the dispatcher already unlocked). Direct
-# `--uninstall` is the same as before: EUID 0 only, no password prompt.
+# when reached from the menu (the dispatcher already unlocked). Desktop
+# TUI `u` re-invokes this via sudo. Direct `--uninstall` is EUID 0 only.
+
+# True when this process is the TTY3 rescue service. Stopping that unit
+# from inside itself deadlocks systemd (`disable --now` waits for us to
+# die; we wait for it). `Conflicts=getty@tty3` would also stop us if we
+# started getty now. Restart=always would respawn the TUI if we just exit.
+teardown_is_tty_service() {
+    local me main
+    me=$$
+    main=$(systemctl show -p MainPID --value project-anthony-tty.service 2>/dev/null || true)
+    [ -n "$main" ] && [ "$main" != "0" ] && [ "$me" = "$main" ]
+}
+
+# Finish work that must outlive this process: restore getty, drop the
+# runtime TTY mask so a later reinstall can start the unit, and
+# `dpkg --purge` so the package record is gone (reinstall does not need
+# a manual purge). A background `&` job dies with the TUI / sudo pty;
+# a transient systemd unit does not.
+schedule_teardown_finish() {
+    local purge="${1:-0}"
+    local script="/run/project-anthony-teardown-finish.sh"
+    cat > "$script" << 'EOS'
+#!/bin/bash
+sleep 2
+systemctl unmask --runtime project-anthony-tty.service >/dev/null 2>&1 || true
+systemctl unmask project-anthony-tty.service >/dev/null 2>&1 || true
+systemctl unmask getty@tty3.service >/dev/null 2>&1 || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
+systemctl start getty@tty3.service >/dev/null 2>&1 || true
+sysctl --system >/dev/null 2>&1 || true
+if [ "${1:-0}" = "1" ]; then
+    dpkg --purge project-anthony >/dev/null 2>&1 || true
+fi
+rm -f /run/project-anthony-teardown-finish.sh
+EOS
+    chmod 700 "$script"
+    if ! systemd-run --collect --quiet "$script" "$purge"; then
+        echo "⚠️  Could not schedule post-uninstall purge. Run: sudo dpkg --purge project-anthony"
+        return 1
+    fi
+    if [ "$purge" = "1" ]; then
+        echo "📦 Package purge scheduled. You can reinstall without a manual dpkg --purge."
+    fi
+}
 
 execute_system_teardown() {
     echo "=================================================="
@@ -68,7 +112,15 @@ execute_system_teardown() {
 
     # 4. Remove TTY3 rescue service and restore stock getty
     echo "⚓ Step 4: Removing TTY3 rescue console..."
-    systemctl disable --now project-anthony-tty.service >/dev/null 2>&1 || true
+    TEARDOWN_SELF=0
+    if teardown_is_tty_service; then
+        TEARDOWN_SELF=1
+        systemctl disable project-anthony-tty.service >/dev/null 2>&1 || true
+        # Mask so Restart=always cannot respawn the TUI after we exit.
+        systemctl mask --runtime project-anthony-tty.service >/dev/null 2>&1 || true
+    else
+        systemctl disable --now project-anthony-tty.service >/dev/null 2>&1 || true
+    fi
     rm -rf /etc/systemd/system/getty@tty3.service.d
     rm -f /etc/xdg/autostart/project-anthony-hotkeys.desktop
     rm -f /etc/xdg/autostart/project-anthony-first-run.desktop
@@ -116,16 +168,23 @@ execute_system_teardown() {
     rmdir /run/project-anthony-usbcheck 2>/dev/null || true
     rm -f /etc/systemd/system/multi-user.target.wants/project-anthony-monitor.service \
         /etc/systemd/system/multi-user.target.wants/project-anthony-tty.service
-    systemctl unmask getty@tty3.service >/dev/null 2>&1 || true
-    systemctl daemon-reload
-    systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
-    systemctl start getty@tty3.service >/dev/null 2>&1 || true
-    echo "✔ TTY3 restored to a normal login getty."
+    if [ "$TEARDOWN_SELF" -eq 1 ]; then
+        echo "✔ TTY3 service disabled. Login getty will start after this console exits."
+    else
+        systemctl unmask getty@tty3.service >/dev/null 2>&1 || true
+        systemctl daemon-reload
+        systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
+        systemctl start getty@tty3.service >/dev/null 2>&1 || true
+        echo "✔ TTY3 restored to a normal login getty."
+    fi
 
     # 5. Disable Magic SysRq drop-in
     echo "⌨️  Step 5: Removing Magic SysRq sysctl drop-in..."
     rm -f /etc/sysctl.d/99-project-anthony-sysrq.conf
-    sysctl --system >/dev/null 2>&1 || true
+    # TTY3 has ProtectKernelTunables=yes; the deferred restorer applies this.
+    if [ "$TEARDOWN_SELF" -eq 0 ]; then
+        sysctl --system >/dev/null 2>&1 || true
+    fi
 
     echo "✔ Magic SysRq drop-in removed."
 
@@ -144,27 +203,19 @@ execute_system_teardown() {
             rm -f "$LAUNCHER_PATH"
             echo "✔ Core binary flagged for deletion."
         fi
-        (
-            sleep 1
-            dpkg --purge project-anthony &>/dev/null
-        ) &
+        # Always purge via a detached unit so closing the TUI cannot
+        # leave the package in `rc`/`ii` and block a later reinstall.
+        schedule_teardown_finish 1
+    elif [ "$TEARDOWN_SELF" -eq 1 ]; then
+        schedule_teardown_finish 0
     fi
 
     echo "=================================================="
     echo "🧹 PROJECT ANTHONY WIPE COMPLETE!        "
     echo "=================================================="
 
-    # Adaptive session type check for a clean graphical exit
-    CURRENT_SESSION_TYPE="$XDG_SESSION_TYPE"
-    if [ -z "$CURRENT_SESSION_TYPE" ]; then
-        CURRENT_SESSION_TYPE=$(loginctl show-session $(loginctl | grep "$USER" | awk '{print $1}') -p Type | cut -d= -f2)
-    fi
-
-    if [ "$CURRENT_SESSION_TYPE" == "x11" ]; then
+    # TTY3: jump back to the compositor. Desktop TUI asks y/n in the caller.
+    if on_kernel_vt; then
         escape_to_desktop
-    else
-        echo "🚪 Wayland context detected. Closing environment window safely..."
-        sleep 1
-        exit 0
     fi
 }
