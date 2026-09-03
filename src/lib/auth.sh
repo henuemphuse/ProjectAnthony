@@ -11,15 +11,6 @@ unlock_account_ok() {
     [ "$uid" -eq 0 ] || { [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ]; }
 }
 
-default_unlock_user() {
-    probe_graphical_session
-    if [ -n "$GRAPHICAL_USER" ] && unlock_account_ok "$GRAPHICAL_USER"; then
-        echo "$GRAPHICAL_USER"
-        return 0
-    fi
-    desktop_users | head -n1
-}
-
 verify_local_password() {
     local user="$1" pass="$2" helper
     helper="/usr/local/bin/project-anthony-auth"
@@ -268,9 +259,8 @@ auth_fail_wait() {
 }
 
 require_console_auth() {
-    local default_user typed user pass fails
+    local typed user pass fails
     fails=$(load_auth_fails)
-    default_user=$(default_unlock_user)
     if [ "$fails" -ge "$AUTH_LOCKOUT" ]; then
         wait_for_lockout_key
         return 0
@@ -284,26 +274,21 @@ require_console_auth() {
         echo " PROJECT ANTHONY: CONSOLE UNLOCK"
         echo "========================================================="
         echo " This is a root rescue console. Unlock with a local"
-        echo " account password before the menu or crash restore."
+        echo " account username and password before the menu or crash restore."
+        echo " Type 'desktop' to leave without unlocking."
         echo ""
         if [ ! -x /usr/local/bin/project-anthony-auth ]; then
             echo " Auth helper is not installed. Reinstall Project Anthony."
             echo ""
         fi
-        if [ -n "$default_user" ]; then
-            echo " User [$default_user], or 'desktop' to leave:"
-        else
-            echo " User (or 'desktop' to leave):"
-        fi
         typed=""
-        if ! IFS= read -r -t "$IDLE_SECS" -p " " typed </dev/tty; then
+        if ! IFS= read -r -t "$IDLE_SECS" -p " Username: " typed </dev/tty; then
             continue
         fi
         if [ -z "$typed" ]; then
-            user="$default_user"
-        else
-            user="$typed"
+            continue
         fi
+        user="$typed"
         if [ "$user" = "desktop" ] || [ "$user" = "d" ] || [ "$user" = "D" ]; then
             escape_to_desktop
             exit 0
