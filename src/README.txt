@@ -115,6 +115,7 @@ COMMAND LINE:
 
 SYSTEM ALTERATIONS MADE:
   - System Launcher Bin: Placed into /usr/local/bin/project-anthony
+  - TUI libraries (sourced, not on PATH): /usr/local/lib/project-anthony/*.sh
   - Manual opener: /usr/local/bin/project-anthony-show-manual
   - Automated Background Script: Placed into /usr/local/bin/liferaft-autosnap.sh
   - System Package Layer Hook: Injected to /etc/apt/apt.conf.d/99-liferaft-autosnap
