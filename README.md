@@ -29,7 +29,15 @@ Source lives in this repo. `./build-deb.sh` copies it into a Debian staging tree
 ```text
 ProjectAnthony/
 ├── src/
-│   ├── liferaft.sh                         # Rescue TUI (installed as /usr/local/bin/project-anthony)
+│   ├── liferaft.sh                         # Rescue TUI dispatcher (installed as /usr/local/bin/project-anthony)
+│   ├── lib/
+│   │   ├── session.sh                    # VT / graphical-session helpers
+│   │   ├── auth.sh                       # TTY3 unlock: PAM, U2F, idle lock, USB token
+│   │   ├── uninstall.sh                  # Self-cleanup (`project-anthony --uninstall`)
+│   │   ├── tui.sh                        # Rescue sub-screens (logs, Timeshift, diagnostics)
+│   │   ├── tui-menu.sh                   # Main menu draw + input dispatch
+│   │   ├── tui-crash.sh                  # Watchdog crash-restore y/n screen
+│   │   └── tui-storage.sh                # Storage matrix + ddrescue clone (menu option 2)
 │   ├── project-anthony-tty.sh            # TTY3 wrapper: exec the password-gated TUI
 │   ├── project-anthony-bind-hotkeys.sh   # Cinnamon Ctrl+Alt+X bind/unbind (CAD stays logout)
 │   ├── project-anthony-auth.c            # PAM password check for TTY3 unlock
@@ -71,6 +79,7 @@ Runtime paths after `dpkg -i`:
 /usr/local/bin/project-anthony-show-manual
 /usr/local/bin/project-anthony-auth
 /usr/local/lib/project-anthony/restrict-pam-caller
+/usr/local/lib/project-anthony/*.sh         ← sourced TUI/auth/uninstall helpers (644, root-owned)
 /usr/local/bin/project-anthony-mk-token
 /usr/local/bin/liferaft-autosnap.sh
 /lib/systemd/system/project-anthony-tty.service

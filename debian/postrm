@@ -2,6 +2,46 @@
 # =========================================================================
 #   PROJECT ANTHONY: POST-REMOVAL CACHE REGISTRY PURGE HOOK
 # =========================================================================
+# On `remove`, fire dpkg --purge so conffiles and the package record go away.
+# On `purge`, mop runtime leftovers dpkg does not own (APT hook, sysctl
+# drop-in, token dir, logs, per-user stamps).
+
+desktop_users() {
+    getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home\// {print $1}'
+}
+
+purge_runtime_leftovers() {
+    rm -f /etc/apt/apt.conf.d/99-liferaft-autosnap
+    rm -f /etc/sysctl.d/99-project-anthony-sysrq.conf
+    sysctl --system >/dev/null 2>&1 || true
+    rm -rf /etc/project-anthony /var/log/project-anthony
+    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor \
+        /run/project-anthony-auth-fails /run/project-anthony-log-alert \
+        /run/project-anthony-log-ratelimit
+    if findmnt -n /run/project-anthony-usbcheck >/dev/null 2>&1; then
+        umount -l /run/project-anthony-usbcheck 2>/dev/null || true
+    fi
+    rmdir /run/project-anthony-usbcheck 2>/dev/null || true
+    rm -f /etc/systemd/system/ctrl-alt-del.target \
+        /etc/systemd/system/project-anthony-cad.service
+    rm -rf /etc/systemd/system/getty@tty3.service.d
+    rm -f /etc/systemd/system/multi-user.target.wants/project-anthony-monitor.service \
+        /etc/systemd/system/multi-user.target.wants/project-anthony-tty.service
+    for u in $(desktop_users); do
+        local_home=$(getent passwd "$u" | cut -d: -f6)
+        [ -n "$local_home" ] || continue
+        rm -f "${local_home}/Desktop/project-anthony.desktop"
+        rm -f "${local_home}/Desktop/project-anthony-manual.desktop"
+        rm -f "${local_home}/desktop/project-anthony.desktop"
+        rm -f "${local_home}/desktop/project-anthony-manual.desktop"
+        rm -rf "${local_home}/.config/project-anthony"
+        rm -rf "${local_home}/.config/liferaft"
+    done
+    rm -rf /root/.config/project-anthony /root/.config/liferaft
+    if [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
+        /usr/local/bin/project-anthony-bind-hotkeys --unbind || true
+    fi
+}
 
 case "$1" in
     remove)
@@ -12,7 +52,10 @@ case "$1" in
             dpkg --purge project-anthony &>/dev/null
         ) &
         ;;
-    purge|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    purge)
+        purge_runtime_leftovers
+        ;;
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
         ;;
     *)
         echo "postrm called with unknown argument \`$1'" >&2

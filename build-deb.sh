@@ -55,6 +55,9 @@ cp -f "$ROOT/src/project-anthony-show-manual.sh" "$DEST/usr/local/bin/project-an
 cp -f "$ROOT/src/project-anthony-mk-token.sh" "$DEST/usr/local/bin/project-anthony-mk-token"
 cp -f "$ROOT/src/project-anthony-restrict-pam-caller.sh" \
   "$DEST/usr/local/lib/project-anthony/restrict-pam-caller"
+for lib in session.sh auth.sh uninstall.sh tui.sh tui-storage.sh tui-crash.sh tui-menu.sh; do
+    cp -f "$ROOT/src/lib/$lib" "$DEST/usr/local/lib/project-anthony/$lib"
+done
 cp -f "$ROOT/src/README.txt" "$DEST/usr/share/doc/project-anthony/README.txt"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/LICENSE"
 cp -f "$ROOT/LICENSE" "$DEST/usr/share/doc/project-anthony/copyright"
@@ -66,6 +69,7 @@ cp -f "$ROOT/packaging/project-anthony-monitor.service" "$DEST/lib/systemd/syste
 cp -f "$ROOT/packaging/project-anthony-tty.service" "$DEST/lib/systemd/system/project-anthony-tty.service"
 install_auth_helper "$DEST/usr/local/bin/project-anthony-auth" "$DEST/etc/pam.d/project-anthony"
 
+chmod 755 "$DEST/usr/local/lib/project-anthony"
 chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony" \
   "$DEST/usr/local/bin/project-anthony-monitor" \
@@ -75,6 +79,14 @@ chmod 755 "$DEST/DEBIAN/postinst" "$DEST/DEBIAN/prerm" "$DEST/DEBIAN/postrm" \
   "$DEST/usr/local/bin/project-anthony-show-manual" \
   "$DEST/usr/local/bin/project-anthony-mk-token" \
   "$DEST/usr/local/lib/project-anthony/restrict-pam-caller"
+chmod 644 \
+  "$DEST/usr/local/lib/project-anthony/session.sh" \
+  "$DEST/usr/local/lib/project-anthony/auth.sh" \
+  "$DEST/usr/local/lib/project-anthony/uninstall.sh" \
+  "$DEST/usr/local/lib/project-anthony/tui.sh" \
+  "$DEST/usr/local/lib/project-anthony/tui-storage.sh" \
+  "$DEST/usr/local/lib/project-anthony/tui-crash.sh" \
+  "$DEST/usr/local/lib/project-anthony/tui-menu.sh"
 chmod 700 "$DEST/usr/local/bin/project-anthony-auth"
 chmod 644 "$DEST/DEBIAN/control" \
   "$DEST/etc/pam.d/project-anthony" \

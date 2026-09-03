@@ -12,7 +12,15 @@ chmod +x /usr/local/bin/liferaft-autosnap.sh \
     /usr/local/bin/project-anthony-show-manual \
     /usr/local/bin/project-anthony-mk-token
 chmod 700 /usr/local/bin/project-anthony-auth
+chmod 755 /usr/local/lib/project-anthony
 chmod 755 /usr/local/lib/project-anthony/restrict-pam-caller
+chmod 644 /usr/local/lib/project-anthony/session.sh \
+    /usr/local/lib/project-anthony/auth.sh \
+    /usr/local/lib/project-anthony/uninstall.sh \
+    /usr/local/lib/project-anthony/tui.sh \
+    /usr/local/lib/project-anthony/tui-storage.sh \
+    /usr/local/lib/project-anthony/tui-crash.sh \
+    /usr/local/lib/project-anthony/tui-menu.sh
 chmod 644 /etc/pam.d/project-anthony /etc/pam.d/project-anthony-u2f
 echo "DPkg::Pre-Install-Pkgs { \"/usr/local/bin/liferaft-autosnap.sh\"; };" > /etc/apt/apt.conf.d/99-liferaft-autosnap
 

@@ -34,6 +34,7 @@ install_auth_helper() {
     fi
     chmod 700 "$dest_bin"
     mkdir -p /usr/local/lib/project-anthony
+    chmod 755 /usr/local/lib/project-anthony
     cp -f "$SRC_DIR/project-anthony-restrict-pam-caller.sh" \
         /usr/local/lib/project-anthony/restrict-pam-caller
     chmod 755 /usr/local/lib/project-anthony/restrict-pam-caller
@@ -97,6 +98,16 @@ fi
 # Use -f to forcefully overwrite /usr/local/bin/project-anthony if it already exists
 cp -f "$SRC_DIR/liferaft.sh" /usr/local/bin/project-anthony
 chmod +x /usr/local/bin/project-anthony
+mkdir -p /usr/local/lib/project-anthony
+chmod 755 /usr/local/lib/project-anthony
+for lib in session.sh auth.sh uninstall.sh tui.sh tui-storage.sh tui-crash.sh tui-menu.sh; do
+    if [ ! -f "$SRC_DIR/lib/$lib" ]; then
+        echo "❌ Critical Error: Unable to locate source file at $SRC_DIR/lib/$lib"
+        exit 1
+    fi
+    cp -f "$SRC_DIR/lib/$lib" "/usr/local/lib/project-anthony/$lib"
+    chmod 644 "/usr/local/lib/project-anthony/$lib"
+done
 echo "✔ Deployed main rescue interface launcher to /usr/local/bin/project-anthony"
 
 cp -f "$INSTALL_ROOT/src/anthony-monitor.sh" /usr/local/bin/project-anthony-monitor
