@@ -546,7 +546,9 @@ execute_system_teardown() {
     echo "🐕 Stopping crash watchdog..."
     systemctl stop project-anthony-monitor.service 2>/dev/null || true
     systemctl disable project-anthony-monitor.service 2>/dev/null || true
-    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor /run/project-anthony-auth-fails
+    rm -f /run/project-anthony-state /run/project-anthony-monitor.cursor /run/project-anthony-auth-fails \
+        /run/project-anthony-log-alert /run/project-anthony-log-ratelimit
+    rm -rf /var/log/project-anthony
     if [ -z "${DPKG_MAINTSCRIPT_PACKAGE:-}" ]; then
         rm -f /etc/systemd/system/project-anthony-monitor.service
         rm -f /usr/local/bin/project-anthony-monitor
@@ -677,6 +679,8 @@ execute_system_teardown() {
 # State file (written by anthony-monitor): line 1 = CRASH_TRIGGERED,
 # line 2 = one-line summary, remaining lines = short evidence snippet.
 STATE_FILE="/run/project-anthony-state"
+LOG_FILE="/var/log/project-anthony/system.log"
+ALERT_FILE="/run/project-anthony-log-alert"
 # Match anthony-monitor.sh: printable ASCII, 8 x 76. Re-apply on read so a
 # stale or tampered state file cannot inject control chars into the TTY.
 sanitize_crash_text() {
@@ -685,6 +689,107 @@ sanitize_crash_text() {
         | cut -c1-76 \
         | grep -v '^$' \
         | head -n 8
+}
+
+# Flag is world-readable on purpose (token ERROR only). Evidence is 0600.
+system_log_status() {
+    if [ -f "$ALERT_FILE" ]; then
+        echo "error"
+    else
+        echo "OK"
+    fi
+}
+
+# Static snapshot only: last 12 records, never journalctl/dmesg --follow.
+MAX_LOG_RECORDS=12
+MAX_LOG_RECORD_LINES=7
+LOG_READ_BYTES=16384
+
+sanitize_system_log_line() {
+    tr -cd '\11\12\15\40-\176' | cut -c1-76
+}
+
+# Keep the newest MAX_LOG_RECORDS blocks (=== stamped records).
+last_log_records() {
+    awk -v max="$MAX_LOG_RECORDS" -v per="$MAX_LOG_RECORD_LINES" '
+        /^=== / {
+            rec++
+            nlines[rec] = 0
+        }
+        {
+            if (rec < 1) next
+            if (nlines[rec] >= per) next
+            nlines[rec]++
+            buf[rec] = buf[rec] $0 "\n"
+        }
+        END {
+            start = rec - max + 1
+            if (start < 1) start = 1
+            for (i = start; i <= rec; i++) printf "%s", buf[i]
+        }
+    '
+}
+
+# Bounded snapshot of the on-disk log. Not a live kernel feed.
+read_system_log_raw() {
+    if [ "$(id -u)" -eq 0 ]; then
+        tail -c "$LOG_READ_BYTES" "$LOG_FILE" 2>/dev/null || true
+        rm -f "$ALERT_FILE"
+        return 0
+    fi
+    sudo /bin/sh -c 'tail -c 16384 /var/log/project-anthony/system.log 2>/dev/null || true; rm -f /run/project-anthony-log-alert'
+}
+
+clear_system_log() {
+    if [ "$(id -u)" -eq 0 ]; then
+        rm -f "$LOG_FILE" "$ALERT_FILE"
+        return 0
+    fi
+    sudo /bin/sh -c 'rm -f /var/log/project-anthony/system.log /run/project-anthony-log-alert' 2>/dev/null || true
+}
+
+show_system_logs() {
+    local raw="" status rc=0
+    clear
+    echo "========================================================="
+    echo "  PROJECT ANTHONY: SYSTEM LOGS"
+    echo "========================================================="
+    status=$(system_log_status)
+    echo "  status: $status"
+    echo "  Last ${MAX_LOG_RECORDS} recorded events (snapshot, not a live feed)"
+    echo "---------------------------------------------------------"
+    echo ""
+
+    raw=$(read_system_log_raw)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  Cannot read the system log (administrator privileges required)."
+        echo "  Evidence stays root-only; the status flag is not cleared."
+        echo ""
+        echo "---------------------------------------------------------"
+        tui_read fakeKey "Press [Enter] to return..."
+        return
+    fi
+
+    raw=$(printf '%s\n' "$raw" | sanitize_system_log_line | last_log_records)
+    if [ -z "$raw" ]; then
+        echo "  No Project Anthony errors recorded."
+        echo "  Self-faults and rescue trips show a short snapshot here."
+    else
+        printf '%s\n' "$raw"
+    fi
+
+    echo ""
+    echo "---------------------------------------------------------"
+    echo "  [Enter] return to menu    [c] clear log"
+    echo "---------------------------------------------------------"
+    tui_read log_choice "Enter command: "
+    if [[ "$log_choice" == "c" || "$log_choice" == "C" ]]; then
+        clear_system_log
+        echo ""
+        echo "✔ System log cleared."
+        sleep 1
+    fi
 }
 
 rolling_snapshot_id() {
@@ -847,6 +952,7 @@ do
 	else
 		echo " 5. Exit to Graphical Desktop"
 	fi
+	echo " 6. System logs (status: $(system_log_status))"
 	echo " h. View Manual (hotkeys, what it does, how to open it)"
 	echo "=========================================="
 	echo " Access: Ctrl+Alt+X (desktop)  |  Ctrl+Alt+F3 (frozen)  |  Alt+SysRq+R then F3 (stuck keyboard)"
@@ -1103,6 +1209,9 @@ do
 				# Already inside a desktop terminal window — just close the TUI.
 				exit 0
 			fi
+			;;
+		6)
+			show_system_logs
 			;;
 		h|H|help|manual|m|M)
 			MANUAL="/usr/share/doc/project-anthony/README.txt"

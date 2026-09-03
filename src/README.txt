@@ -57,6 +57,10 @@ CORE OVERVIEW FUNCTIONS:
   4. Hardware & Kernel Diagnostics: Displays real-time motherboard rail
      voltages, thermals, and fan RPMs while pulling critical hardware-level
      error logs straight from the Linux kernel ring buffer.
+  5. System logs: Menu option 6 shows OK or error. Error means the
+     watchdog logged a self-fault without taking the console. Opening
+     it prints a static snapshot of the last 12 short records, not a
+     live kernel feed. Evidence is root-only; opening clears the flag.
 
 BACKGROUND WATCHDOG:
   project-anthony-monitor.service is a low-priority daemon (nice 19, idle
@@ -66,6 +70,23 @@ BACKGROUND WATCHDOG:
   failed, plus a short journal snippet), restarts TTY3, and switches you
   there. TTY3 asks for a local account password before the crash prompt
   or the rescue menu. Returning to the desktop locks it again.
+
+  If the fault is in Project Anthony itself (kernel comm truncated to
+  project-anthony, or systemd restarted the monitor), the watchdog does
+  not steal the console. It appends a sanitized record to a root-only
+  log and raises a one-word status flag. Open the TUI and use:
+    6. System logs (status: OK)
+    6. System logs (status: error)
+  "error" means the watchdog logged a self-fault or its own restart
+  (the console was not taken). Opening option 6 prints a static
+  snapshot of at most the last 12 short records — it does not follow
+  the kernel journal or stream live crash data. Opening clears the
+  flag; [c] deletes the log. Rescue trips are also appended for
+  history but do not set the flag (TTY3 already notified you). The
+  log lives at /var/log/project-anthony/system.log (mode 600,
+  directory 700). The flag is /run/project-anthony-log-alert (mode
+  644, contents: ERROR). Random local users can see OK vs error,
+  not the evidence.
 
   The TUI then names what tripped the watchdog and prints the evidence:
     Kernel oops, panic, or hung task
@@ -112,6 +133,7 @@ SYSTEM ALTERATIONS MADE:
     sudo project-anthony-mk-token --u2f  (or --u2f-import)
   - Magic SysRq unraw only (kernel.sysrq=16) via /etc/sysctl.d/99-project-anthony-sysrq.conf
   - Crash watchdog: project-anthony-monitor.service (enabled at install)
+  - Watchdog / system log: /var/log/project-anthony/system.log (root-only)
 
 SECURITY NOTE:
   TTY3 still runs as root so a frozen machine can be recovered, but the
@@ -122,7 +144,9 @@ SECURITY NOTE:
   fifth failed attempt locks the console until a registered rescue USB
   is inserted (or you reboot; reboot clears the count). The count stays
   in /run and clears on reboot. There is no root
-  shell. The TUI does not install packages, and disk clones only go to
+  shell. Watchdog evidence stays in root-only files (crash state and
+  system.log). The TUI status flag is only the word ERROR. The TUI does
+  not install packages, and disk clones only go to
   another disk or a folder under /mnt, /media, /root, or /home.
   Type 'desktop' at the user prompt to leave without unlocking.
   Next F3 asks again. Magic SysRq is keyboard unraw only (sysrq = 16).
