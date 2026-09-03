@@ -17,6 +17,10 @@ LOG_DIR="/var/log/project-anthony"
 LOG_FILE="$LOG_DIR/system.log"
 POLL_SEC=4
 BOOT_GRACE_SEC=45
+# Compositor teardown during logout/reboot looks like a crash for one poll.
+# Kernel oops and a failed display-manager still trip on the first hit.
+COMPOSITOR_DEAD_POLLS=2
+COMPOSITOR_DEAD_STREAK=0
 STARTED_AT="$(date +%s)"
 # State/cursor/log files are root-only. The alert flag is world-readable on
 # purpose: it is only the token "ERROR", never crash evidence.
@@ -49,12 +53,36 @@ user_graphical_session() {
     return 1
 }
 
-# Compositor died under a still-registered graphical login (not the greeter).
-compositor_dead() {
+# Ask PID 1 only. logind can already be gone, and a D-Bus wait during
+# teardown is how a watchdog delays reboot.
+system_shutting_down() {
+    local state
+    state=$(systemctl is-system-running 2>/dev/null || true)
+    [ "$state" = "stopping" ] && return 0
+    systemctl is-active --quiet shutdown.target 2>/dev/null
+}
+
+# Snapshot: compositor gone under a still-registered graphical login.
+# Re-check shutdown after probing; reboot can start mid-poll.
+compositor_looks_dead() {
+    system_shutting_down && return 1
     systemctl is-active --quiet display-manager 2>/dev/null || return 1
     user_graphical_session || return 1
     wm_running && return 1
+    system_shutting_down && return 1
     return 0
+}
+
+# Compositor death is confirmed across consecutive polls so a normal
+# logout or reboot cannot hijack TTY3. Real crashes stay dead.
+compositor_dead() {
+    if compositor_looks_dead; then
+        COMPOSITOR_DEAD_STREAK=$((COMPOSITOR_DEAD_STREAK + 1))
+        [ "$COMPOSITOR_DEAD_STREAK" -ge "$COMPOSITOR_DEAD_POLLS" ]
+    else
+        COMPOSITOR_DEAD_STREAK=0
+        return 1
+    fi
 }
 
 # Kernel faults only. Userspace "segfault at" lines are omitted so a crashing
@@ -274,7 +302,7 @@ collect_crash_report() {
         CRASH_DETAIL=$(display_manager_report)
         return 0
     fi
-    if compositor_dead; then
+    if compositor_looks_dead; then
         CRASH_SUMMARY="Desktop compositor died"
         CRASH_DETAIL=$(compositor_dead_report)
         return 0
@@ -300,11 +328,14 @@ record_systemd_restart_if_any() {
 }
 
 trigger_rescue() {
+    # Never start or restart units after systemd has begun shutting down.
+    system_shutting_down && return 0
     if [ -f "$STATE_FILE" ]; then
         chvt 3 2>/dev/null || true
         return 0
     fi
     collect_crash_report || true
+    system_shutting_down && return 0
     [ -z "$CRASH_SUMMARY" ] && CRASH_SUMMARY="a system crash"
     {
         echo "CRASH_TRIGGERED"
@@ -317,7 +348,9 @@ trigger_rescue() {
     if [ -n "$CRASH_DETAIL" ]; then
         logger -t project-anthony-monitor "$(printf '%s' "$CRASH_DETAIL" | tr '\n' '|' )"
     fi
+    system_shutting_down && return 0
     systemctl restart project-anthony-tty.service >/dev/null 2>&1 || true
+    system_shutting_down && return 0
     chvt 3 2>/dev/null || true
 }
 
@@ -329,6 +362,12 @@ record_systemd_restart_if_any
 LATCHED=0
 
 while true; do
+    if system_shutting_down; then
+        COMPOSITOR_DEAD_STREAK=0
+        sleep "$POLL_SEC"
+        continue
+    fi
+
     now=$(date +%s)
     if [ $((now - STARTED_AT)) -lt "$BOOT_GRACE_SEC" ]; then
         sleep "$POLL_SEC"

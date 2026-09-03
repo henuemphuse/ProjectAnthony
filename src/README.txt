@@ -68,7 +68,10 @@ BACKGROUND WATCHDOG:
   under a live graphical login, a failed display manager, or a new kernel
   oops/panic/hung_task. On a hit it writes a crash report (what
   failed, plus a short journal snippet), restarts TTY3, and switches you
-  there. TTY3 asks for a local account password before the crash prompt
+  there. A normal reboot or logout is not a crash: the watchdog stays
+  quiet once systemd is stopping, and compositor death must persist
+  across two polls before TTY3 is taken (kernel/display-manager faults
+  still trip immediately). TTY3 asks for a local account password before the crash prompt
   or the rescue menu. Returning to the desktop locks it again.
 
   If the fault is in Project Anthony itself (kernel comm truncated to
