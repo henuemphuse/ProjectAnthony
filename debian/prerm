@@ -3,14 +3,10 @@
 #   PROJECT ANTHONY: PRE-REMOVAL MAINTAINER SYSTEM TEARDOWN HOOK
 # =========================================================================
 
-if systemctl is-active --quiet project-anthony-monitor.service; then
-    systemctl stop project-anthony-monitor.service 2>/dev/null
-    systemctl disable project-anthony-monitor.service 2>/dev/null
-fi
-if systemctl is-active --quiet project-anthony-tty.service; then
-    systemctl stop project-anthony-tty.service 2>/dev/null
-    systemctl disable project-anthony-tty.service 2>/dev/null
-fi
+systemctl stop project-anthony-monitor.service 2>/dev/null || true
+systemctl disable project-anthony-monitor.service 2>/dev/null || true
+systemctl stop project-anthony-tty.service 2>/dev/null || true
+systemctl disable project-anthony-tty.service 2>/dev/null || true
 
 # DPKG_MAINTSCRIPT_PACKAGE is set here so --uninstall leaves packaged files to dpkg
 if [ -f /usr/local/bin/project-anthony ]; then

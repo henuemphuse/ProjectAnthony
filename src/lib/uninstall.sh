@@ -52,6 +52,20 @@ execute_system_teardown() {
     systemctl daemon-reload
     echo "✔ systemd Ctrl+Alt+Del restored to default reboot behavior."
 
+    # Restore desktop hotkeys before deleting the binder binary.
+    echo "⌨️  Restoring desktop hotkeys to system defaults..."
+    if [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
+        /usr/local/bin/project-anthony-bind-hotkeys --unbind || true
+    else
+        for u in $(desktop_users); do
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.media-keys logout "['<Control><Alt>Delete']"
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ binding "[]"
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ command "''"
+            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ name "''"
+        done
+    fi
+    echo "✔ Ctrl+Alt+X released. Ctrl+Alt+Del is Cinnamon logout."
+
     # 4. Remove TTY3 rescue service and restore stock getty
     echo "⚓ Step 4: Removing TTY3 rescue console..."
     systemctl disable --now project-anthony-tty.service >/dev/null 2>&1 || true
@@ -92,7 +106,16 @@ execute_system_teardown() {
         rm -f "${local_home}/desktop/project-anthony.desktop"
         rm -f "${local_home}/desktop/project-anthony-manual.desktop"
         rm -f "${local_home}/.config/project-anthony/manual-seen"
+        rm -rf "${local_home}/.config/project-anthony"
+        rm -rf "${local_home}/.config/liferaft"
     done
+    rm -rf /root/.config/project-anthony /root/.config/liferaft
+    if findmnt -n /run/project-anthony-usbcheck >/dev/null 2>&1; then
+        umount -l /run/project-anthony-usbcheck 2>/dev/null || true
+    fi
+    rmdir /run/project-anthony-usbcheck 2>/dev/null || true
+    rm -f /etc/systemd/system/multi-user.target.wants/project-anthony-monitor.service \
+        /etc/systemd/system/multi-user.target.wants/project-anthony-tty.service
     systemctl unmask getty@tty3.service >/dev/null 2>&1 || true
     systemctl daemon-reload
     systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
@@ -104,18 +127,7 @@ execute_system_teardown() {
     rm -f /etc/sysctl.d/99-project-anthony-sysrq.conf
     sysctl --system >/dev/null 2>&1 || true
 
-    # 6. Restore Cinnamon Ctrl+Alt+Del logout mapping for every desktop user
-    echo "⌨️  Step 6: Restoring desktop Ctrl+Alt+Del logout shortcut..."
-    if [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
-        /usr/local/bin/project-anthony-bind-hotkeys --unbind || true
-    else
-        for u in $(desktop_users); do
-            gsettings_as "$u" set org.cinnamon.desktop.keybindings.media-keys logout "['<Control><Alt>Delete']"
-            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ binding "[]"
-            gsettings_as "$u" set org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/ command "''"
-        done
-    fi
-    echo "✔ Desktop logout hotkey restored."
+    echo "✔ Magic SysRq drop-in removed."
 
     # 7. Scrub the TTY3 Shell Trap from root's .bashrc
     echo "🧹 Step 7: Scrubbing shell trap blocks from /root/.bashrc..."

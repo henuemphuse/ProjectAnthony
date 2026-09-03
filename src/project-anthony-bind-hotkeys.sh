@@ -47,10 +47,35 @@ apply_bindings() {
     touch_custom_list
 }
 
+# Strip ids from a gsettings string-array value. Empty result is @as [].
+drop_list_ids() {
+    local list="$1" id
+    shift
+    for id in "$@"; do
+        list=$(printf '%s\n' "$list" | sed \
+            -e "s/, '$id'//g" \
+            -e "s/'$id', //g" \
+            -e "s/'$id'//g")
+    done
+    list=$(printf '%s\n' "$list" | sed -e 's/\[, */[/' -e 's/, *\]/]/' -e 's/, *,/, /g')
+    case "$list" in
+        "[]"|"[ ]"|"['']"|""|"@as []") echo "@as []" ;;
+        *) echo "$list" ;;
+    esac
+}
+
+# Ctrl+Alt+Del back to Cinnamon logout. Ctrl+Alt+X released. custom0 dropped.
 unbind_bindings() {
+    gs set org.cinnamon.desktop.keybindings.media-keys logout "['<Control><Alt>Delete']"
     custom_gs binding "[]"
     custom_gs command "''"
+    custom_gs name "''"
+    # Reload grabs while the empty binding is still listed, then remove our ids.
     touch_custom_list
+    local list new
+    list=$(gs get org.cinnamon.desktop.keybindings custom-list 2>/dev/null || echo "[]")
+    new=$(drop_list_ids "$list" "$CUSTOM_ID" "__dummy__")
+    gs set org.cinnamon.desktop.keybindings custom-list "$new"
 }
 
 gsettings_on_bus() {
