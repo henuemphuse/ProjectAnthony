@@ -7,12 +7,12 @@
 #
 # Usage:
 #   ./build-deb.sh
-#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-1_amd64
+#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-2_amd64
 # =========================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PKG_NAME="ProjectAnthony_1.0-1_amd64"
+PKG_NAME="ProjectAnthony_1.0-2_amd64"
 DEST="${1:-"$ROOT/build/$PKG_NAME"}"
 OUT_DEB="$(dirname "$DEST")/${PKG_NAME}.deb"
 
