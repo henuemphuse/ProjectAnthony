@@ -51,7 +51,8 @@ CORE OVERVIEW FUNCTIONS:
      display manager context reloads under LightDM.
   2. Smart Storage Matrix: Extracts physical hardware SMART controller
      diagnostics, live capacity tracking, and streams block-level clones/
-     backups via ddrescue.
+     backups via ddrescue. Unmounted volumes can be mounted first so
+     free space is real before a clone.
   3. Timeshift Restore: Automatically reads, lists, and mounts system 
      snapshots with targeted shortcuts for automated background rollbacks.
   4. Hardware & Kernel Diagnostics: Displays real-time motherboard rail
@@ -116,6 +117,12 @@ COMMAND LINE:
   sudo project-anthony --crash-prompt
                                   Test the watchdog y/n prompt
 
+UNINSTALL:
+  Type u or uninstall at the rescue menu. From a living desktop that
+  asks for sudo. On TTY3 it is already root. After a desktop uninstall,
+  choose whether to close the window or drop to a shell. TTY3 returns
+  to the compositor. apt remove also runs the same teardown.
+
 SYSTEM ALTERATIONS MADE:
   - System Launcher Bin: Placed into /usr/local/bin/project-anthony
   - TUI libraries (sourced, not on PATH): /usr/local/lib/project-anthony/*.sh
@@ -142,7 +149,8 @@ SYSTEM ALTERATIONS MADE:
 SECURITY NOTE:
   TTY3 still runs as root so a frozen machine can be recovered, but the
   menu and crash-restore prompt stay locked until a local account
-  password is accepted (your desktop user by default). After unlock,
+  username and password are accepted. The unlock prompt does not
+  pre-fill the username. After unlock,
   60 seconds idle at a prompt relocks the console. Failed unlocks wait
   10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the
   fifth failed attempt locks the console until a registered rescue USB
