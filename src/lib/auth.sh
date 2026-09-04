@@ -119,11 +119,20 @@ expected_token_hash() {
     tr -d ' \t\r\n' < "$TOKEN_HASH_FILE" 2>/dev/null | tr 'A-F' 'a-f'
 }
 
+# mk-token writes 64 hex chars plus a newline (~65 bytes). Bound the read so a
+# huge or non-regular file on a stick cannot OOM the root TUI.
+TOKEN_FILE_MAX_BYTES=256
+
 token_file_matches() {
-    local got want raw
+    local got want raw sz
+    [ -e "$1" ] || return 1
+    [ -L "$1" ] && return 1
     [ -f "$1" ] && [ -r "$1" ] || return 1
-    raw=$(tr -d ' \t\r\n' < "$1" 2>/dev/null)
-    [ "${#raw}" -ge 32 ] || return 1
+    sz=$(stat -c '%s' "$1" 2>/dev/null) || return 1
+    [[ "$sz" =~ ^[0-9]+$ ]] || return 1
+    [ "$sz" -ge 32 ] && [ "$sz" -le "$TOKEN_FILE_MAX_BYTES" ] || return 1
+    raw=$(head -c "$TOKEN_FILE_MAX_BYTES" "$1" 2>/dev/null | tr -d ' \t\r\n')
+    [ "${#raw}" -ge 32 ] && [ "${#raw}" -le "$TOKEN_FILE_MAX_BYTES" ] || return 1
     got=$(printf '%s' "$raw" | sha256sum | awk '{print $1}')
     want=$(expected_token_hash)
     [ -n "$got" ] && [ -n "$want" ] && [ "$got" = "$want" ]
@@ -144,9 +153,11 @@ block_usb_or_removable() {
     [ "$rm" = "1" ] || [ "$tran" = "usb" ]
 }
 
+# USB sticks people actually pass to mk-token. Skip iso9660/udf/btrfs/xfs so
+# the lockout scanner does not mount CD/UDF/btrfs gadgets as root.
 fstype_token_ok() {
     case "$1" in
-        vfat|fat|fat32|msdos|exfat|ntfs|ntfs3|ext2|ext3|ext4|btrfs|xfs|udf|iso9660|f2fs) return 0 ;;
+        vfat|fat|fat32|msdos|exfat|ntfs|ntfs3|ext2|ext3|ext4|f2fs) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -176,6 +187,20 @@ unmount_token_check() {
     findmnt -n "$USB_CHECK_MNT" >/dev/null 2>&1 && umount -l "$USB_CHECK_MNT" 2>/dev/null || true
 }
 
+# Short timeout so a wedged USB cannot hang the lockout loop forever.
+mount_token_check() {
+    local dev="$1" opts
+    mkdir -p "$USB_CHECK_MNT"
+    for opts in "ro,nosuid,nodev,noexec,nosymfollow" "ro,nosuid,nodev,noexec"; do
+        if command -v timeout >/dev/null; then
+            timeout 5 mount -o "$opts" "$dev" "$USB_CHECK_MNT" 2>/dev/null && return 0
+        else
+            mount -o "$opts" "$dev" "$USB_CHECK_MNT" 2>/dev/null && return 0
+        fi
+    done
+    return 1
+}
+
 scan_unmounted_usb_for_token() {
     local name typ fs src_root
     src_root=$(findmnt -nro SOURCE / 2>/dev/null)
@@ -190,7 +215,7 @@ scan_unmounted_usb_for_token() {
         fstype_token_ok "$fs" || continue
         block_usb_or_removable "$name" || continue
         findmnt -n "$name" >/dev/null 2>&1 && continue
-        if mount -o ro,nosuid,nodev,noexec "$name" "$USB_CHECK_MNT" 2>/dev/null; then
+        if mount_token_check "$name"; then
             if token_file_matches "$USB_CHECK_MNT/$TOKEN_NAME"; then
                 unmount_token_check
                 return 0

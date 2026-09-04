@@ -108,6 +108,25 @@ if ! command -v timeshift >/dev/null; then
     exit 0
 fi
 
+# Never SIGKILL a live restore. Unattended-upgrades would otherwise abort
+# an administrator's Timeshift rollback and snapshot a half-restored tree.
+timeshift_restore_in_progress() {
+    local pid cmd
+    for pid in $(pgrep -x timeshift 2>/dev/null) $(pgrep -x timeshift-gtk 2>/dev/null); do
+        [ -n "$pid" ] || continue
+        cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+        case "$cmd" in
+            *'--restore'*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+if timeshift_restore_in_progress; then
+    echo "⚠️  Timeshift restore is running. Skipping rolling snapshot so the restore is not killed."
+    exit 0
+fi
+
 # 🚨 PROCESS UNLOCK ENGINE
 # Check if an instance of Timeshift is already running or hanging in the background
 if pgrep -x "timeshift" >/dev/null || pgrep -x "timeshift-gtk" >/dev/null; then
@@ -128,31 +147,33 @@ fi
 echo "🚀 Project Anthony: Scanning for old rolling snapshots..."
 
 # Quietly query the system backends for an existing automated signature id string
-OLD_SNAPSHOT_ID=$(timeshift --list --scripted 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+OLD_SNAPSHOT_ID=$(timeshift --list --scripted 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}' | tail -n1)
 [[ "$OLD_SNAPSHOT_ID" =~ ^[0-9A-Za-z._-]+$ ]] || OLD_SNAPSHOT_ID=""
-
-# Redundancy First-Run Safeguard: Only execute the delete loop if an old id actually exists
-if [ ! -z "$OLD_SNAPSHOT_ID" ]; then
-    echo "🗑️ Project Anthony: Purging previous backup ($OLD_SNAPSHOT_ID) to protect storage capacity..."
-    timeshift --delete --snapshot "$OLD_SNAPSHOT_ID" --yes --scripted
-else
-    echo "✔ No old rolling snapshots found. Proceeding with clean disk configuration layout..."
-fi
 
 echo "📸 Project Anthony: Generating fresh pre-update rolling snapshot..."
 
-# Commit the fresh system state restore point with your distinct string tag signature
+# Create first, then drop the previous rolling slot. Deleting first left a
+# window with no recovery point if --create failed (disk full, Timeshift error).
 # --yes --scripted is required: without it Timeshift waits on a TTY and APT
 # frontends (mintUpdate) skip or abort the snapshot.
 if timeshift_is_configured; then
     if ! timeshift --create --comments "SYSTEM_LIFERAFT_ROLLING" --tags O --yes --scripted; then
-        echo "❌ Rolling snapshot failed. APT will continue."
+        echo "❌ Rolling snapshot failed. Keeping the previous slot. APT will continue."
         exit 0
     fi
 else
     if ! timeshift --create --rsync --comments "SYSTEM_LIFERAFT_ROLLING" --tags O --yes --scripted; then
-        echo "❌ Rolling snapshot failed. APT will continue."
+        echo "❌ Rolling snapshot failed. Keeping the previous slot. APT will continue."
         exit 0
+    fi
+fi
+
+if [ -n "$OLD_SNAPSHOT_ID" ]; then
+    NEW_SNAPSHOT_ID=$(timeshift --list --scripted 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}' | tail -n1)
+    [[ "$NEW_SNAPSHOT_ID" =~ ^[0-9A-Za-z._-]+$ ]] || NEW_SNAPSHOT_ID=""
+    if [ -n "$NEW_SNAPSHOT_ID" ] && [ "$NEW_SNAPSHOT_ID" != "$OLD_SNAPSHOT_ID" ]; then
+        echo "🗑️ Project Anthony: Purging previous backup ($OLD_SNAPSHOT_ID) to protect storage capacity..."
+        timeshift --delete --snapshot "$OLD_SNAPSHOT_ID" --yes --scripted || true
     fi
 fi
 

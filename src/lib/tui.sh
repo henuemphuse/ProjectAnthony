@@ -115,7 +115,7 @@ show_system_logs() {
 
 rolling_snapshot_id() {
     local id
-    id=$(run_priv timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+    id=$(run_priv timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}' | tail -n1)
     [[ "$id" =~ ^[0-9A-Za-z._-]+$ ]] || return 1
     printf '%s\n' "$id"
 }
@@ -162,20 +162,28 @@ desktop_reinit_menu() {
                     local_dbus=""
                     [ -n "$local_uid" ] && [ -S "/run/user/${local_uid}/bus" ] && local_dbus="unix:path=/run/user/${local_uid}/bus"
                     # stdin MUST be /dev/null or cinnamon inherits this TTY and eats Enter.
-                    if [ "$(id -u)" -eq 0 ] && [ -n "$local_user" ] && [ "$local_user" != "root" ]; then
-                        run_as_user "$local_user" env \
-                            DISPLAY="$local_display" \
-                            ${local_auth:+XAUTHORITY="$local_auth"} \
-                            ${local_dbus:+DBUS_SESSION_BUS_ADDRESS="$local_dbus"} \
-                            ${local_uid:+XDG_RUNTIME_DIR="/run/user/${local_uid}"} \
-                            cinnamon --replace </dev/null >/dev/null 2>&1 &
+                    # Never start cinnamon as root: empty GRAPHICAL_USER used to fall
+                    # through to a root --replace on :0.
+                    if [ "$(id -u)" -eq 0 ]; then
+                        if [ -z "$local_user" ] || [ "$local_user" = "root" ]; then
+                            echo "❌ No desktop user session found. Cannot soft-restart Cinnamon."
+                            echo "   Use option b to restart the display manager instead."
+                        else
+                            run_as_user "$local_user" env \
+                                DISPLAY="$local_display" \
+                                ${local_auth:+XAUTHORITY="$local_auth"} \
+                                ${local_dbus:+DBUS_SESSION_BUS_ADDRESS="$local_dbus"} \
+                                ${local_uid:+XDG_RUNTIME_DIR="/run/user/${local_uid}"} \
+                                cinnamon --replace </dev/null >/dev/null 2>&1 &
+                            echo "✔ Refresh signal transmitted to the active desktop environment."
+                        fi
                     else
                         env DISPLAY="$local_display" \
                             ${local_auth:+XAUTHORITY="$local_auth"} \
                             cinnamon --replace </dev/null >/dev/null 2>&1 &
+                        echo "✔ Refresh signal transmitted to the active desktop environment."
                     fi
                     disown >/dev/null 2>&1 || true
-                    echo "✔ Refresh signal transmitted to the active desktop environment."
                 else
                     echo "⛔ Action blocked! Soft-replacing a compositor on Wayland will crash your session."
                 fi

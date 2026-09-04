@@ -1,6 +1,7 @@
 # Sourced by /usr/local/bin/project-anthony. Not a standalone program.
-# Crash-restore y/n screen. The dispatcher calls this after TTY3 unlock
-# (or on --crash-prompt) and before the main menu.
+# Crash-restore screen. The dispatcher calls this after TTY3 unlock
+# (or on --crash-prompt) and before the main menu. Panic-y is not enough;
+# type YES so a forced compositor kill cannot one-key restore.
 
 # State file (written by anthony-monitor): line 1 = CRASH_TRIGGERED,
 # line 2 = one-line summary, remaining lines = short evidence snippet.
@@ -43,13 +44,15 @@ crash_recovery_prompt() {
         printf '%s\n' "$details" | sed 's/^/  /'
     fi
     echo ""
-    echo "Would you like to restore from backup? [y/n]"
+    echo "Would you like to restore from backup?"
+    echo " This snapshot is the last pre-apt rolling point, not a"
+    echo " verified clean image. Type YES to restore, or n to skip."
     echo "---------------------------------------------------------"
     echo ""
-    tui_read crash_choice "Enter choice [y/n]: "
+    tui_read crash_choice "Enter choice [YES/n]: "
     echo ""
 
-    if [[ "$crash_choice" == "y" || "$crash_choice" == "Y" ]]; then
+    if [[ "$crash_choice" == "YES" || "$crash_choice" == "yes" ]]; then
         echo "🚀 Opening Timeshift restore..."
         SYSTEM_SNAP_ID=$(rolling_snapshot_id || true)
         if [ -n "$SYSTEM_SNAP_ID" ]; then
