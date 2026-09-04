@@ -17,6 +17,12 @@ PKG_NAME="ProjectAnthony_1.0-4_amd64"
 DEST="${1:-"$ROOT/build/$PKG_NAME"}"
 OUT_DEB="$(dirname "$DEST")/${PKG_NAME}.deb"
 
+if ! command -v gcc >/dev/null; then
+    echo "gcc is required to build the PAM helper. Refusing to ship the Python fallback in the .deb."
+    echo "Install gcc and retry."
+    exit 1
+fi
+
 install_auth_helper() {
     local dest_bin="$1" dest_pam="$2" pamlib="" dest_u2f
     dest_u2f="$(dirname "$dest_pam")/project-anthony-u2f"
@@ -24,11 +30,11 @@ install_auth_helper() {
     cp -f "$ROOT/packaging/project-anthony.pam" "$dest_pam"
     cp -f "$ROOT/packaging/project-anthony-u2f.pam" "$dest_u2f"
     pamlib=$(ls /lib/*/libpam.so.0 /usr/lib/*/libpam.so.0 2>/dev/null | head -n1 || true)
-    if command -v gcc >/dev/null && [ -n "$pamlib" ]; then
-        gcc -O2 -s -o "$dest_bin" "$ROOT/src/project-anthony-auth.c" "$pamlib"
-    else
-        cp -f "$ROOT/src/project-anthony-auth.py" "$dest_bin"
+    if [ -z "$pamlib" ]; then
+        echo "libpam.so.0 not found. Cannot link project-anthony-auth."
+        exit 1
     fi
+    gcc -O2 -s -o "$dest_bin" "$ROOT/src/project-anthony-auth.c" "$pamlib"
     chmod 700 "$dest_bin"
     chmod 644 "$dest_pam" "$dest_u2f"
 }

@@ -106,11 +106,14 @@ BACKGROUND WATCHDOG:
       Graphical session still registered, but cinnamon/gnome-shell/kwin
       is not running
   Then it asks:
-    Would you like to restore from backup? [y/n]
-      y  → Timeshift restore (rolling snapshot, or the full wizard)
-      n  → Would you like to return to the desktop? [y/n]
+    Would you like to restore from backup?
+    Type YES to restore, or n to skip.
+      YES → Timeshift restore (rolling snapshot, or the full wizard)
+      n   → Would you like to return to the desktop? [y/n]
              y  → switch back to the graphical VT
              n  → open the normal rescue menu
+    Menu option 3 still uses y/n; only the watchdog crash screen
+    requires YES so a panicky single keystroke cannot roll back.
 
   Test the prompt without a real crash:
     sudo project-anthony --crash-prompt
@@ -120,7 +123,13 @@ COMMAND LINE:
   project-anthony                 Rescue TUI
   project-anthony --manual        This document
   sudo project-anthony --crash-prompt
-                                  Test the watchdog y/n prompt
+                                  Test the watchdog crash prompt (type YES)
+
+UNINSTALL:
+  Type u or uninstall at the rescue menu. From a living desktop that
+  asks for sudo. On TTY3 it is already root. After a desktop uninstall,
+  choose whether to close the window or drop to a shell. TTY3 returns
+  to the compositor. apt remove also runs the same teardown.
 
 UNINSTALL:
   Type u or uninstall at the rescue menu. From a living desktop that

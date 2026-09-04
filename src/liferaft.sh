@@ -26,8 +26,8 @@ pa_source() {
         exit 1
     }
     f="$PA_LIB/$name"
-    [ -f "$f" ] && [ -r "$f" ] || {
-        echo "❌ Missing $f"
+    [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || {
+        echo "❌ Missing or refusing symlink $f"
         echo "Reinstall Project Anthony."
         exit 1
     }
@@ -45,10 +45,10 @@ pa_source() {
     . "$f"
 }
 
-if [ ! -d "$PA_LIB" ] \
+if [ ! -d "$PA_LIB" ] || [ -L "$PA_LIB" ] \
     || [ "$(stat -c '%u' "$PA_LIB" 2>/dev/null)" != "0" ] \
-    || [ -n "$(find "$PA_LIB" -maxdepth 0 -perm -0002 2>/dev/null)" ]; then
-    echo "❌ Refusing to use $PA_LIB (missing, not root-owned, or world-writable)."
+    || [ -n "$(find "$PA_LIB" -maxdepth 0 -perm -0022 2>/dev/null)" ]; then
+    echo "❌ Refusing to use $PA_LIB (missing, symlink, not root-owned, or group/world-writable)."
     exit 1
 fi
 
@@ -113,6 +113,9 @@ pa_source tui-menu.sh
 # the crash restore prompt or the rescue menu. Desktop Ctrl+Alt+X is unchanged.
 if [ "$ON_KERNEL_VT" -eq 1 ]; then
     require_console_auth || exit 1
+elif [ "$(id -u)" -ne 0 ] && [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
+    # Genuine desktop TUI: put the real command back if gsettings drifted.
+    /usr/local/bin/project-anthony-bind-hotkeys >/dev/null 2>&1 || true
 fi
 
 # 🚨 Watchdog intercept: crash flag from the monitor, or an explicit test flag

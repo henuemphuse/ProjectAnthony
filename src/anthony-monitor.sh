@@ -171,7 +171,7 @@ bump_cursor() {
 }
 
 kernel_snippet() {
-    journalctl -k -q --since "$(cursor_since)" --no-pager 2>/dev/null || true
+    journalctl -k -q --since "$(cursor_since)" --no-pager -n 200 2>/dev/null || true
 }
 
 # Comm: lines, hung_task "task name:pid", soft-lockup "[name:pid]".
