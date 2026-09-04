@@ -208,7 +208,7 @@ execute_system_teardown() {
     echo "🧹 PROJECT ANTHONY WIPE COMPLETE!        "
     echo "=================================================="
 
-    # TTY3: jump back to the compositor. Desktop TUI asks y/n in the caller.
+    # TTY3: jump back to the compositor. Desktop TUI just closes.
     if on_kernel_vt; then
         escape_to_desktop
     fi

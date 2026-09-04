@@ -280,31 +280,17 @@ open_packaged_manual() {
     fi
 }
 
-# After a successful desktop uninstall: y closes the window, n drops to a
-# shell in this terminal. TTY3 never reaches here (teardown chvt+exits).
+# After a successful desktop uninstall, close this window. TTY3 teardown
+# already chvt's back to the compositor and exits; if we still get here
+# on a kernel VT, do the same instead of offering a root shell.
 after_uninstall_prompt() {
     echo ""
     echo "✔ Project Anthony has been removed from this system."
-    while true; do
-        tui_read leave_choice "Exit to desktop? [y/n]: "
-        case "$leave_choice" in
-            y|Y)
-                exit 0
-                ;;
-            n|N)
-                echo ""
-                echo "Dropping to a terminal. Type 'exit' to close this window."
-                cd "${HOME:-/}" 2>/dev/null || cd / || true
-                exec "${SHELL:-/bin/bash}" -i
-                echo "Could not start a shell."
-                tui_read fakeKey "Press [Enter] to close..."
-                exit 0
-                ;;
-            *)
-                echo "Please enter y or n."
-                ;;
-        esac
-    done
+    if on_kernel_vt; then
+        escape_to_desktop
+    fi
+    sleep 1
+    exit 0
 }
 
 confirm_and_uninstall() {

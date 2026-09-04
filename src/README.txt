@@ -127,15 +127,9 @@ COMMAND LINE:
 
 UNINSTALL:
   Type u or uninstall at the rescue menu. From a living desktop that
-  asks for sudo. On TTY3 it is already root. After a desktop uninstall,
-  choose whether to close the window or drop to a shell. TTY3 returns
-  to the compositor. apt remove also runs the same teardown.
-
-UNINSTALL:
-  Type u or uninstall at the rescue menu. From a living desktop that
-  asks for sudo. On TTY3 it is already root. After a desktop uninstall,
-  choose whether to close the window or drop to a shell. TTY3 returns
-  to the compositor. apt remove also runs the same teardown.
+  asks for sudo. On TTY3 it is already root. After a desktop uninstall
+  the window closes. TTY3 returns to the compositor. There is no
+  post-uninstall shell. apt remove also runs the same teardown.
 
 SYSTEM ALTERATIONS MADE:
   - System Launcher Bin: Placed into /usr/local/bin/project-anthony
