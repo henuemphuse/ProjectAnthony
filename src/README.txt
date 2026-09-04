@@ -67,12 +67,17 @@ BACKGROUND WATCHDOG:
   project-anthony-monitor.service is a low-priority daemon (nice 19, idle
   I/O, 32 MB cap). Every few seconds it checks for a compositor death
   under a live graphical login, a failed display manager, or a new kernel
-  oops/panic/hung_task. On a hit it writes a crash report (what
+  oops/panic/hung_task. On a confirmed hit it writes a crash report (what
   failed, plus a short journal snippet), restarts TTY3, and switches you
   there. A normal reboot or logout is not a crash: the watchdog stays
-  quiet once systemd is stopping, and compositor death must persist
-  across two polls before TTY3 is taken (kernel/display-manager faults
-  still trip immediately). TTY3 asks for a local account password before the crash prompt
+  quiet once systemd is stopping. Recoverable faults (hung task, soft
+  lockup, dead compositor, failed display-manager) are re-checked across
+  a short confirmation loop (~6s, or ~20s for a one-shot hung_task /
+  soft-lockup warning) so a brief stall can clear before TTY3 is taken.
+  Kernel oops, panic, BUG, and hard LOCKUP still trip immediately.
+  Sleep, hibernate, and lid-open thaw get a ~15s grace (~20s after boot):
+  kernel freeze warnings and a compositor that is still coming back are
+  not treated as a crash. TTY3 asks for a local account password before the crash prompt
   or the rescue menu. Returning to the desktop locks it again.
 
   If the fault is in Project Anthony itself (kernel comm truncated to

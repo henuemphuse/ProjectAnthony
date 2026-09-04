@@ -5,8 +5,11 @@
 # Polls cheap kernel/session signals.
 #
 # Real desktop/kernel deaths still switch to TTY3 for the Timeshift prompt.
-# Faults in this watchdog (or its own truncated kernel comm) are logged
-# instead, and the TUI "System logs" row shows error until they are read.
+# Recoverable hangs are re-checked across several polls so a brief stall
+# can clear before the console is taken. Sleep/wake thaw is given a grace
+# period so opening the lid does not look like a crash. Faults in this
+# watchdog (or its own truncated kernel comm) are logged instead, and the
+# TUI "System logs" row shows error until they are read.
 # =========================================================================
 
 STATE_FILE="/run/project-anthony-state"
@@ -15,12 +18,26 @@ ALERT_FILE="/run/project-anthony-log-alert"
 RATE_FILE="/run/project-anthony-log-ratelimit"
 LOG_DIR="/var/log/project-anthony"
 LOG_FILE="$LOG_DIR/system.log"
-POLL_SEC=4
-BOOT_GRACE_SEC=45
-# Compositor teardown during logout/reboot looks like a crash for one poll.
-# Kernel oops and a failed display-manager still trip on the first hit.
-COMPOSITOR_DEAD_POLLS=2
-COMPOSITOR_DEAD_STREAK=0
+POLL_SEC=2
+BOOT_GRACE_SEC=20
+# Freeze/thaw looks like hung_task/soft lockup and can stall the compositor
+# while the GPU comes back. Ignore crashes for this long after a resume.
+RESUME_GRACE_SEC=15
+# Wall-clock jump larger than this means we were frozen (sleep), not a slow poll.
+RESUME_GAP_SEC=10
+LAST_POLL_AT="$(date +%s)"
+RESUME_GRACE_UNTIL=0
+WAS_ASLEEP=0
+# Recoverable faults (hung task, soft lockup, dead compositor, failed
+# display-manager) must stay true across CONFIRM_POLLS (~6s) so a brief
+# stall can clear. A one-shot hung_task/soft-lockup journal line is held
+# for SOFT_HOLD_POLLS (~20s) so a second kernel warning can arrive.
+# Oops, panic, BUG, and hard LOCKUP still trip on the first hit.
+CONFIRM_POLLS=3
+SOFT_HOLD_POLLS=10
+HOLD_STREAK=0
+HOLD_SOFT=0
+SOFT_SEEN=""
 STARTED_AT="$(date +%s)"
 # State/cursor/log files are root-only. The alert flag is world-readable on
 # purpose: it is only the token "ERROR", never crash evidence.
@@ -62,6 +79,16 @@ system_shutting_down() {
     systemctl is-active --quiet shutdown.target 2>/dev/null
 }
 
+# sleep.target covers suspend/hibernate/hybrid-sleep. Check the specific
+# targets too in case we poll mid-transition before sleep.target is up.
+system_asleep_or_suspending() {
+    systemctl is-active --quiet sleep.target 2>/dev/null \
+        || systemctl is-active --quiet suspend.target 2>/dev/null \
+        || systemctl is-active --quiet hibernate.target 2>/dev/null \
+        || systemctl is-active --quiet hybrid-sleep.target 2>/dev/null \
+        || systemctl is-active --quiet suspend-then-hibernate.target 2>/dev/null
+}
+
 # Snapshot: compositor gone under a still-registered graphical login.
 # Re-check shutdown after probing; reboot can start mid-poll.
 compositor_looks_dead() {
@@ -73,21 +100,39 @@ compositor_looks_dead() {
     return 0
 }
 
-# Compositor death is confirmed across consecutive polls so a normal
-# logout or reboot cannot hijack TTY3. Real crashes stay dead.
-compositor_dead() {
-    if compositor_looks_dead; then
-        COMPOSITOR_DEAD_STREAK=$((COMPOSITOR_DEAD_STREAK + 1))
-        [ "$COMPOSITOR_DEAD_STREAK" -ge "$COMPOSITOR_DEAD_POLLS" ]
-    else
-        COMPOSITOR_DEAD_STREAK=0
-        return 1
+hold_reset() {
+    HOLD_STREAK=0
+    HOLD_SOFT=0
+    SOFT_SEEN=""
+}
+
+hold_recover() {
+    if [ "$HOLD_SOFT" -eq 1 ]; then
+        bump_cursor
+        logger -t project-anthony-monitor \
+            "Recoverable hang cleared before confirmation; TTY3 not taken"
     fi
+    hold_reset
+}
+
+enter_resume_grace() {
+    local now
+    now=$(date +%s)
+    if [ "$now" -ge "$RESUME_GRACE_UNTIL" ]; then
+        logger -t project-anthony-monitor \
+            "Resume/sleep thaw detected; ${RESUME_GRACE_SEC}s grace, TTY3 not taken"
+    fi
+    RESUME_GRACE_UNTIL=$((now + RESUME_GRACE_SEC))
+    hold_reset
+    bump_cursor
 }
 
 # Kernel faults only. Userspace "segfault at" lines are omitted so a crashing
 # app cannot steal the physical console onto the TTY3 TUI.
-KERNEL_FAULT_RE='Oops:|kernel panic|BUG: unable to handle|hung_task|soft lockup|hard LOCKUP'
+# Hard faults do not self-heal. Soft faults can be a one-shot warning.
+KERNEL_HARD_RE='Oops:|kernel panic|BUG: unable to handle|hard LOCKUP'
+KERNEL_SOFT_RE='hung_task|soft lockup'
+KERNEL_FAULT_RE="$KERNEL_HARD_RE|$KERNEL_SOFT_RE"
 
 # TASK_COMM_LEN is 15 chars. project-anthony-monitor and -tty both become
 # "project-anthony". Never treat those as a reason to hijack the console.
@@ -138,6 +183,13 @@ fault_comms_from() {
         | grep -v '^$' | sort -u
 }
 
+fault_pids_from() {
+    printf '%s\n' "$1" | sed -n \
+        -e 's/.*[[:space:]]task [^:[:space:]]*:\([0-9][0-9]*\).*/\1/p' \
+        -e 's/.*\[[^][:space:]]*:\([0-9][0-9]*\)\].*/\1/p' \
+        | grep -E '^[0-9]+$' | sort -u
+}
+
 comms_all_ours() {
     local line any=0
     [ -n "$1" ] || return 1
@@ -149,21 +201,39 @@ comms_all_ours() {
     [ "$any" -eq 1 ]
 }
 
-kernel_has_fault_line() {
-    printf '%s\n' "$1" | grep -Eiq "$KERNEL_FAULT_RE"
+kernel_has_line() {
+    printf '%s\n' "$1" | grep -Eiq "$2"
 }
 
-# Foreign (or unattributed) kernel fault: still a rescue-worthy crash.
-kernel_fault() {
+kernel_has_fault_line() {
+    kernel_has_line "$1" "$KERNEL_FAULT_RE"
+}
+
+# Foreign (or unattributed) kernel fault matching the given regex.
+kernel_fault_matching() {
+    local re="$1"
     local snippet comms
     snippet=$(kernel_snippet)
-    kernel_has_fault_line "$snippet" || return 1
+    kernel_has_line "$snippet" "$re" || return 1
     comms=$(fault_comms_from "$snippet")
     if [ -z "$comms" ]; then
         return 0
     fi
     comms_all_ours "$comms" && return 1
     return 0
+}
+
+kernel_hard_fault() {
+    kernel_fault_matching "$KERNEL_HARD_RE"
+}
+
+kernel_soft_fault() {
+    kernel_fault_matching "$KERNEL_SOFT_RE"
+}
+
+# Foreign (or unattributed) kernel fault: still a rescue-worthy crash.
+kernel_fault() {
+    kernel_hard_fault || kernel_soft_fault
 }
 
 # Attributed kernel fault whose every comm is this program. Log, do not chvt.
@@ -175,12 +245,52 @@ kernel_self_fault() {
     comms_all_ours "$comms"
 }
 
-display_manager_failed() {
-    systemctl is-failed --quiet display-manager 2>/dev/null
+# hung_task PIDs still in uninterruptible sleep (D). A task that woke up
+# is treated as recovered even though the original journal line remains.
+soft_pids_stuck() {
+    local snippet pids pid state
+    snippet=$(kernel_snippet)
+    kernel_has_line "$snippet" "$KERNEL_SOFT_RE" || return 1
+    pids=$(fault_pids_from "$snippet")
+    [ -n "$pids" ] || return 1
+    while IFS= read -r pid; do
+        [ -z "$pid" ] && continue
+        [ -d "/proc/$pid" ] || continue
+        state=$(awk '/^State:/{print $2; exit}' "/proc/$pid/status" 2>/dev/null) || continue
+        [ "$state" = "D" ] && return 0
+    done < <(printf '%s\n' "$pids")
+    return 1
 }
 
-crash_detected() {
-    kernel_fault || display_manager_failed || compositor_dead
+# Extra hung_task/soft-lockup lines beyond the ones that opened the hold.
+soft_kernel_new_lines() {
+    local snippet current extra
+    [ -n "$SOFT_SEEN" ] || return 1
+    snippet=$(kernel_snippet)
+    current=$(printf '%s\n' "$snippet" | grep -Ei "$KERNEL_SOFT_RE" || true)
+    extra=$(printf '%s\n' "$current" \
+        | grep -Fxv -f <(printf '%s\n' "$SOFT_SEEN") \
+        | grep -v '^$' || true)
+    [ -n "$extra" ]
+}
+
+# Live recoverable condition. A stale hung_task journal line is not enough
+# once SOFT_SEEN is set: the PID must still be in D, or a new line must
+# have arrived, or the desktop itself must still be down.
+recoverable_fault_now() {
+    display_manager_failed && return 0
+    compositor_looks_dead && return 0
+    soft_pids_stuck && return 0
+    if [ -n "$SOFT_SEEN" ]; then
+        soft_kernel_new_lines && return 0
+    else
+        kernel_soft_fault && return 0
+    fi
+    return 1
+}
+
+display_manager_failed() {
+    systemctl is-failed --quiet display-manager 2>/dev/null
 }
 
 kernel_fault_report() {
@@ -362,26 +472,81 @@ record_systemd_restart_if_any
 LATCHED=0
 
 while true; do
+    now=$(date +%s)
+
     if system_shutting_down; then
-        COMPOSITOR_DEAD_STREAK=0
+        hold_reset
+        LAST_POLL_AT=$now
         sleep "$POLL_SEC"
         continue
     fi
 
-    now=$(date +%s)
+    if system_asleep_or_suspending; then
+        WAS_ASLEEP=1
+        hold_reset
+        LAST_POLL_AT=$now
+        sleep "$POLL_SEC"
+        continue
+    fi
+
+    if [ "$WAS_ASLEEP" -eq 1 ] \
+        || { [ "$LAST_POLL_AT" -gt 0 ] && [ $((now - LAST_POLL_AT)) -gt "$RESUME_GAP_SEC" ]; }; then
+        enter_resume_grace
+    fi
+    WAS_ASLEEP=0
+    LAST_POLL_AT=$now
+
+    if [ "$now" -lt "$RESUME_GRACE_UNTIL" ]; then
+        hold_reset
+        bump_cursor
+        sleep "$POLL_SEC"
+        continue
+    fi
+
     if [ $((now - STARTED_AT)) -lt "$BOOT_GRACE_SEC" ]; then
         sleep "$POLL_SEC"
         continue
     fi
 
-    if crash_detected; then
+    if kernel_hard_fault; then
         if [ "$LATCHED" -eq 0 ]; then
             trigger_rescue
             LATCHED=1
+            hold_reset
             bump_cursor
+        fi
+    elif recoverable_fault_now; then
+        if [ "$LATCHED" -eq 0 ]; then
+            if [ "$HOLD_STREAK" -eq 0 ]; then
+                if kernel_soft_fault; then
+                    HOLD_SOFT=1
+                    SOFT_SEEN=$(printf '%s\n' "$(kernel_snippet)" \
+                        | grep -Ei "$KERNEL_SOFT_RE" || true)
+                fi
+            fi
+            HOLD_STREAK=$((HOLD_STREAK + 1))
+            if [ "$HOLD_STREAK" -ge "$CONFIRM_POLLS" ]; then
+                trigger_rescue
+                LATCHED=1
+                hold_reset
+                bump_cursor
+            fi
+        fi
+    elif [ "$LATCHED" -eq 0 ] && [ "$HOLD_STREAK" -gt 0 ]; then
+        # Quiet poll inside a confirmation window: keep holding a
+        # hung_task/soft-lockup warning until SOFT_HOLD_POLLS so a
+        # second kernel line can arrive; compositor/DM recover immediately.
+        if [ "$HOLD_SOFT" -eq 1 ] && [ "$HOLD_STREAK" -lt "$SOFT_HOLD_POLLS" ]; then
+            HOLD_STREAK=$((HOLD_STREAK + 1))
+            if [ "$HOLD_STREAK" -ge "$SOFT_HOLD_POLLS" ]; then
+                hold_recover
+            fi
+        else
+            hold_recover
         fi
     elif kernel_self_fault; then
         handle_self_fault
+        hold_reset
         bump_cursor
     else
         LATCHED=0
