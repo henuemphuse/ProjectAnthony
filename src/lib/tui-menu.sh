@@ -39,6 +39,8 @@ draw_core_menu() {
     echo "=========================================="
     echo " Access: Ctrl+Alt+X (desktop)  |  Ctrl+Alt+F3 (frozen)  |  Alt+SysRq+R then F3 (stuck keyboard)"
     echo "=========================================="
+    echo " Uninstall: type [u] or uninstall"
+    echo "=========================================="
 }
 
 dispatch_core_choice() {
