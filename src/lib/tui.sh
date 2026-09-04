@@ -244,7 +244,15 @@ hardware_diagnostics() {
     echo ""
     echo "🧠 Core Kernel Alerts & Hardware Allocations (Last 5 Alerts):"
     echo "-------------------------------------------------------------------------"
-    run_priv dmesg -T | grep -Ei "error|fail|panic|corrupt|kill|hardware" | tail -n 5 || echo "✔ Kernel reports clean hardware allocations."
+    # Drop LSM/audit/sandbox noise ("kill" was matching AppArmor signal=kill).
+    alerts=$(run_priv dmesg -T 2>/dev/null | grep -Ei "error|fail|panic|oops|bug:|corrupt|oom|out of memory|hardware|mce|i/o error" \
+        | grep -Eiv 'audit:|apparmor=|seccomp|ufw block|cursor_sandbox' \
+        | tail -n 5)
+    if [ -n "$alerts" ]; then
+        printf '%s\n' "$alerts"
+    else
+        echo "✔ Kernel reports clean hardware allocations."
+    fi
     echo "-------------------------------------------------------------------------"
     echo ""
     echo "👉 Press [Enter] to return or [x] to exit straight to desktop"
