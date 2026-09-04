@@ -7,12 +7,13 @@
 #
 # Usage:
 #   ./build-deb.sh
-#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-3_amd64
+#   sudo ./build-deb.sh /home/johnny/Development/ProjectAnthony_1.0-4_amd64
 # =========================================================================
 set -euo pipefail
+umask 022
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PKG_NAME="ProjectAnthony_1.0-3_amd64"
+PKG_NAME="ProjectAnthony_1.0-4_amd64"
 DEST="${1:-"$ROOT/build/$PKG_NAME"}"
 OUT_DEB="$(dirname "$DEST")/${PKG_NAME}.deb"
 
@@ -101,7 +102,8 @@ chmod 644 "$DEST/DEBIAN/control" \
   "$DEST/usr/share/doc/project-anthony/LICENSE" \
   "$DEST/usr/share/doc/project-anthony/copyright"
 
+find "$DEST" -type d -exec chmod 755 {} +
 mkdir -p "$(dirname "$OUT_DEB")"
-dpkg-deb --build "$DEST" "$OUT_DEB"
+dpkg-deb --root-owner-group --build "$DEST" "$OUT_DEB"
 echo "✔ Built $OUT_DEB"
 dpkg-deb -I "$OUT_DEB"

@@ -7,11 +7,42 @@
 #              Force-closes any existing Timeshift instances to clear process
 #              locks before executing a single-slot rolling snapshot pass.
 #
+#              APT must call this from DPkg::Pre-Invoke (not Pre-Install-Pkgs).
+#              Pre-Install-Pkgs feeds .deb paths on stdin; Timeshift then
+#              treats them as y/n answers and the snapshot is skipped.
+#              mintUpdate/aptkit also skip Pre-Install-Pkgs.
+#
 #              --rsync is only passed when Timeshift has no existing setup.
 #              Passing it against a live config switches the saved backend
 #              (btrfs → rsync), so configured machines must use --create
 #              with no mode flag and let Timeshift load timeshift.json.
 # =========================================================================
+
+LOG_DIR="/var/log/project-anthony"
+LOG_FILE="${LOG_DIR}/autosnap.log"
+
+autosnap_log_setup() {
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+    if [ -d "$LOG_DIR" ] && [ -w "$LOG_DIR" ]; then
+        touch "$LOG_FILE" 2>/dev/null || true
+        chmod 640 "$LOG_FILE" 2>/dev/null || true
+        echo "=== $(date -Is 2>/dev/null || date) pid=$$ ===" >> "$LOG_FILE"
+        if command -v tee >/dev/null; then
+            exec > >(tee -a "$LOG_FILE") 2>&1
+        else
+            exec >>"$LOG_FILE" 2>&1
+        fi
+    fi
+}
+
+# APT Pre-Install-Pkgs (legacy) sends package filenames on stdin. Never let
+# Timeshift read that stream as confirmation answers.
+detach_apt_stdin() {
+    if [ ! -t 0 ]; then
+        cat >/dev/null 2>/dev/null || true
+        exec </dev/null
+    fi
+}
 
 timeshift_config_file() {
     if [ -f /etc/timeshift/timeshift.json ]; then
@@ -63,8 +94,17 @@ if [ "${1:-}" = "--bootstrap" ]; then
     exit 0
 fi
 
+# mintUpdate / apt can set this to skip a one-shot snapshot.
+if [ -n "${SKIP_AUTOSNAP:-}" ]; then
+    exit 0
+fi
+
+autosnap_log_setup
+detach_apt_stdin
+
 # Fail-safe condition check: Exit immediately if Timeshift was manually removed
 if ! command -v timeshift >/dev/null; then
+    echo "⚠️  Timeshift is not installed. Skipping rolling snapshot."
     exit 0
 fi
 
@@ -72,25 +112,29 @@ fi
 # Check if an instance of Timeshift is already running or hanging in the background
 if pgrep -x "timeshift" >/dev/null || pgrep -x "timeshift-gtk" >/dev/null; then
     echo "⚠️  Project Anthony: Existing Timeshift process lock detected! Clearing runtime space..."
-    # Forcefully terminate all running instances to free up the system database lock
-    sudo killall -9 timeshift 2>/dev/null
-    sudo killall -9 timeshift-gtk 2>/dev/null
-    # Wipe the temporary system layout lock files left behind on the drive partition
-    sudo rm -f /var/run/timeshift.lock
-    sudo rm -rf /run/timeshift/app/
+    if [ "$(id -u)" -eq 0 ]; then
+        killall -9 timeshift timeshift-gtk 2>/dev/null || true
+        rm -f /var/run/timeshift.lock
+        rm -rf /run/timeshift/app/
+    else
+        sudo killall -9 timeshift 2>/dev/null || true
+        sudo killall -9 timeshift-gtk 2>/dev/null || true
+        sudo rm -f /var/run/timeshift.lock
+        sudo rm -rf /run/timeshift/app/
+    fi
     sleep 1
 fi
 
 echo "🚀 Project Anthony: Scanning for old rolling snapshots..."
 
 # Quietly query the system backends for an existing automated signature id string
-OLD_SNAPSHOT_ID=$(timeshift --list 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
+OLD_SNAPSHOT_ID=$(timeshift --list --scripted 2>/dev/null | grep "SYSTEM_LIFERAFT_ROLLING" | awk '{print $3}')
 [[ "$OLD_SNAPSHOT_ID" =~ ^[0-9A-Za-z._-]+$ ]] || OLD_SNAPSHOT_ID=""
 
 # Redundancy First-Run Safeguard: Only execute the delete loop if an old id actually exists
 if [ ! -z "$OLD_SNAPSHOT_ID" ]; then
     echo "🗑️ Project Anthony: Purging previous backup ($OLD_SNAPSHOT_ID) to protect storage capacity..."
-    timeshift --delete --snapshot "$OLD_SNAPSHOT_ID" --yes
+    timeshift --delete --snapshot "$OLD_SNAPSHOT_ID" --yes --scripted
 else
     echo "✔ No old rolling snapshots found. Proceeding with clean disk configuration layout..."
 fi
@@ -98,8 +142,19 @@ fi
 echo "📸 Project Anthony: Generating fresh pre-update rolling snapshot..."
 
 # Commit the fresh system state restore point with your distinct string tag signature
+# --yes --scripted is required: without it Timeshift waits on a TTY and APT
+# frontends (mintUpdate) skip or abort the snapshot.
 if timeshift_is_configured; then
-    timeshift --create --comments "SYSTEM_LIFERAFT_ROLLING" --tags O
+    if ! timeshift --create --comments "SYSTEM_LIFERAFT_ROLLING" --tags O --yes --scripted; then
+        echo "❌ Rolling snapshot failed. APT will continue."
+        exit 0
+    fi
 else
-    timeshift --create --rsync --comments "SYSTEM_LIFERAFT_ROLLING" --tags O
+    if ! timeshift --create --rsync --comments "SYSTEM_LIFERAFT_ROLLING" --tags O --yes --scripted; then
+        echo "❌ Rolling snapshot failed. APT will continue."
+        exit 0
+    fi
 fi
+
+echo "✔ Rolling snapshot SYSTEM_LIFERAFT_ROLLING is ready."
+exit 0

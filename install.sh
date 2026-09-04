@@ -108,6 +108,8 @@ for lib in session.sh auth.sh uninstall.sh tui.sh tui-storage.sh tui-crash.sh tu
     cp -f "$SRC_DIR/lib/$lib" "/usr/local/lib/project-anthony/$lib"
     chmod 644 "/usr/local/lib/project-anthony/$lib"
 done
+chown -R root:root /usr/local/lib/project-anthony
+chmod 755 /usr/local/lib/project-anthony
 echo "✔ Deployed main rescue interface launcher to /usr/local/bin/project-anthony"
 
 cp -f "$INSTALL_ROOT/src/anthony-monitor.sh" /usr/local/bin/project-anthony-monitor
@@ -147,7 +149,7 @@ echo "✔ Deployed single-slot rolling snapshot execution matrix."
 echo "⚓ Step 5: Anchoring automated update hook..."
 HOOK_CONF="/etc/apt/apt.conf.d/99-liferaft-autosnap"
 # Single redirect bracket '>' completely overwrites the configuration hook file cleanly
-echo "DPkg::Pre-Install-Pkgs { \"$AUTOSNAP_PATH\"; };" > "$HOOK_CONF"
+echo "DPkg::Pre-Invoke { \"[ -x /usr/local/bin/liferaft-autosnap.sh ] && /usr/local/bin/liferaft-autosnap.sh || true\"; };" > "$HOOK_CONF"
 echo "✔ APT layer hook successfully locked into /etc/apt/apt.conf.d/"
 
 # 6. Desktop hotkey: Ctrl+Alt+X (Ctrl+Alt+Del stays as logout)

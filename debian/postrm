@@ -10,6 +10,31 @@ desktop_users() {
     getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home\// {print $1}'
 }
 
+desktop_dirs_for() {
+    local u="$1" home xdg
+    home=$(getent passwd "$u" | cut -d: -f6)
+    [ -n "$home" ] || return 0
+    xdg=$(runuser -u "$u" -- xdg-user-dir DESKTOP 2>/dev/null || true)
+    printf '%s\n' "$xdg" "${home}/Desktop" "${home}/desktop" | awk 'NF && !seen[$0]++'
+}
+
+remove_desktop_launchers() {
+    local u="$1" desk f
+    while IFS= read -r desk; do
+        [ -d "$desk" ] || continue
+        rm -f "${desk}/project-anthony.desktop" \
+            "${desk}/project-anthony-manual.desktop"
+        find "$desk" -maxdepth 1 \( \
+            -iname 'project-anthony*.desktop' -o \
+            -iname '*project anthony*.desktop' \
+        \) -delete 2>/dev/null || true
+        for f in "${desk}/README.txt" "${desk}/README" "${desk}/project-anthony-README.txt"; do
+            [ -f "$f" ] || continue
+            grep -q 'PROJECT ANTHONY' "$f" 2>/dev/null && rm -f "$f"
+        done
+    done < <(desktop_dirs_for "$u")
+}
+
 purge_runtime_leftovers() {
     rm -f /etc/apt/apt.conf.d/99-liferaft-autosnap
     rm -f /etc/sysctl.d/99-project-anthony-sysrq.conf
@@ -30,10 +55,7 @@ purge_runtime_leftovers() {
     for u in $(desktop_users); do
         local_home=$(getent passwd "$u" | cut -d: -f6)
         [ -n "$local_home" ] || continue
-        rm -f "${local_home}/Desktop/project-anthony.desktop"
-        rm -f "${local_home}/Desktop/project-anthony-manual.desktop"
-        rm -f "${local_home}/desktop/project-anthony.desktop"
-        rm -f "${local_home}/desktop/project-anthony-manual.desktop"
+        remove_desktop_launchers "$u"
         rm -rf "${local_home}/.config/project-anthony"
         rm -rf "${local_home}/.config/liferaft"
     done

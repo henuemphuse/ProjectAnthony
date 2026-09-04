@@ -6,6 +6,38 @@ desktop_users() {
     getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home\// {print $1}'
 }
 
+# XDG desktop dir plus common fallbacks (localized names, lowercase).
+desktop_dirs_for() {
+    local u="$1" home xdg
+    home=$(getent passwd "$u" | cut -d: -f6)
+    [ -n "$home" ] || return 0
+    if [ "$(id -u)" -eq 0 ]; then
+        xdg=$(runuser -u "$u" -- xdg-user-dir DESKTOP 2>/dev/null || true)
+    else
+        xdg=$(sudo -u "$u" xdg-user-dir DESKTOP 2>/dev/null || true)
+        [ -n "$xdg" ] || xdg=$(xdg-user-dir DESKTOP 2>/dev/null || true)
+    fi
+    printf '%s\n' "$xdg" "${home}/Desktop" "${home}/desktop" | awk 'NF && !seen[$0]++'
+}
+
+# Launchers copied by show-manual, plus a README.txt save of the packaged manual.
+remove_desktop_launchers() {
+    local u="$1" desk f
+    while IFS= read -r desk; do
+        [ -d "$desk" ] || continue
+        rm -f "${desk}/project-anthony.desktop" \
+            "${desk}/project-anthony-manual.desktop"
+        find "$desk" -maxdepth 1 \( \
+            -iname 'project-anthony*.desktop' -o \
+            -iname '*project anthony*.desktop' \
+        \) -delete 2>/dev/null || true
+        for f in "${desk}/README.txt" "${desk}/README" "${desk}/project-anthony-README.txt"; do
+            [ -f "$f" ] || continue
+            grep -q 'PROJECT ANTHONY' "$f" 2>/dev/null && rm -f "$f"
+        done
+    done < <(desktop_dirs_for "$u")
+}
+
 # TTY3 is already root. systemd NoNewPrivileges + RestrictSUIDSGID make
 # exec of setuid /usr/bin/sudo fail with "Operation not permitted".
 # Ctrl+Alt+X still runs as the desktop user and needs sudo.

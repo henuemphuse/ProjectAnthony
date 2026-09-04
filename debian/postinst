@@ -4,6 +4,32 @@
 # =========================================================================
 
 # 1. APT pre-install snapshot hook (binary is shipped in the package)
+# dpkg-deb without --root-owner-group used to install these as the builder
+# uid; the TUI refuses non-root libraries and TTY3 restart-loops.
+for p in \
+    /usr/local/lib/project-anthony \
+    /usr/share/doc/project-anthony \
+    /usr/local/bin/project-anthony \
+    /usr/local/bin/project-anthony-monitor \
+    /usr/local/bin/project-anthony-tty \
+    /usr/local/bin/project-anthony-bind-hotkeys \
+    /usr/local/bin/project-anthony-show-manual \
+    /usr/local/bin/project-anthony-mk-token \
+    /usr/local/bin/project-anthony-auth \
+    /usr/local/bin/liferaft-autosnap.sh \
+    /etc/pam.d/project-anthony \
+    /etc/pam.d/project-anthony-u2f \
+    /lib/systemd/system/project-anthony-monitor.service \
+    /lib/systemd/system/project-anthony-tty.service \
+    /etc/systemd/system/project-anthony-monitor.service \
+    /etc/systemd/system/project-anthony-tty.service \
+    /usr/share/applications/project-anthony.desktop \
+    /usr/share/applications/project-anthony-manual.desktop \
+    /etc/xdg/autostart/project-anthony-hotkeys.desktop \
+    /etc/xdg/autostart/project-anthony-first-run.desktop
+do
+    [ -e "$p" ] && chown -R root:root "$p"
+done
 chmod +x /usr/local/bin/liferaft-autosnap.sh \
     /usr/local/bin/project-anthony \
     /usr/local/bin/project-anthony-monitor \
@@ -22,7 +48,7 @@ chmod 644 /usr/local/lib/project-anthony/session.sh \
     /usr/local/lib/project-anthony/tui-crash.sh \
     /usr/local/lib/project-anthony/tui-menu.sh
 chmod 644 /etc/pam.d/project-anthony /etc/pam.d/project-anthony-u2f
-echo "DPkg::Pre-Install-Pkgs { \"/usr/local/bin/liferaft-autosnap.sh\"; };" > /etc/apt/apt.conf.d/99-liferaft-autosnap
+echo "DPkg::Pre-Invoke { \"[ -x /usr/local/bin/liferaft-autosnap.sh ] && /usr/local/bin/liferaft-autosnap.sh || true\"; };" > /etc/apt/apt.conf.d/99-liferaft-autosnap
 
 # Timeshift: rsync bootstrap only when the machine has no existing setup.
 # --rsync switches the saved backend, so never run it over a live config.
