@@ -107,8 +107,11 @@ install_desktop_shortcuts() {
         cp -f "$src" "$dest"
         chown "$u:" "$dest" 2>/dev/null || true
         chmod 0755 "$dest"
+        # Nemo/Cinnamon ignores Desktop launchers until they are marked trusted.
         sudo -u "$u" env $(user_launch_env "$u") \
             gio set "$dest" metadata::trusted true >/dev/null 2>&1 || true
+        sudo -u "$u" env $(user_launch_env "$u") \
+            gio set -t string "$dest" metadata::trusted true >/dev/null 2>&1 || true
     done
 }
 

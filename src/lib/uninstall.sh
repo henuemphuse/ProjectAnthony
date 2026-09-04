@@ -20,11 +20,11 @@ teardown_is_tty_service() {
 # `dpkg --purge` so the package record is gone (reinstall does not need
 # a manual purge). A background `&` job dies with the TUI / sudo pty;
 # a transient systemd unit does not.
+# Do not exec a file from /run — it is noexec, which produced
+# "Failed to find executable ... Permission denied".
 schedule_teardown_finish() {
     local purge="${1:-0}"
-    local script="/run/project-anthony-teardown-finish.sh"
-    cat > "$script" << 'EOS'
-#!/bin/bash
+    if ! systemd-run --collect --quiet /bin/bash -c '
 sleep 2
 systemctl unmask --runtime project-anthony-tty.service >/dev/null 2>&1 || true
 systemctl unmask project-anthony-tty.service >/dev/null 2>&1 || true
@@ -33,13 +33,10 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed getty@tty3.service >/dev/null 2>&1 || true
 systemctl start getty@tty3.service >/dev/null 2>&1 || true
 sysctl --system >/dev/null 2>&1 || true
-if [ "${1:-0}" = "1" ]; then
+if [ "$1" = "1" ]; then
     dpkg --purge project-anthony >/dev/null 2>&1 || true
 fi
-rm -f /run/project-anthony-teardown-finish.sh
-EOS
-    chmod 700 "$script"
-    if ! systemd-run --collect --quiet "$script" "$purge"; then
+' x "$purge"; then
         echo "⚠️  Could not schedule post-uninstall purge. Run: sudo dpkg --purge project-anthony"
         return 1
     fi
@@ -153,10 +150,7 @@ execute_system_teardown() {
     for u in $(desktop_users); do
         local_home=$(getent passwd "$u" | cut -d: -f6)
         [ -n "$local_home" ] || continue
-        rm -f "${local_home}/Desktop/project-anthony.desktop"
-        rm -f "${local_home}/Desktop/project-anthony-manual.desktop"
-        rm -f "${local_home}/desktop/project-anthony.desktop"
-        rm -f "${local_home}/desktop/project-anthony-manual.desktop"
+        remove_desktop_launchers "$u"
         rm -f "${local_home}/.config/project-anthony/manual-seen"
         rm -rf "${local_home}/.config/project-anthony"
         rm -rf "${local_home}/.config/liferaft"
