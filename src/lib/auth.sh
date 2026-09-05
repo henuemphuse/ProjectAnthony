@@ -299,7 +299,7 @@ require_console_auth() {
         echo " PROJECT ANTHONY: CONSOLE UNLOCK"
         echo "========================================================="
         echo " This is a root rescue console. Unlock with a local"
-        echo " account username and password before the menu or crash restore."
+        echo " account username and password before the rescue menu."
         echo " Type 'desktop' to leave without unlocking."
         echo ""
         if [ ! -x /usr/local/bin/project-anthony-auth ]; then

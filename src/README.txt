@@ -77,8 +77,11 @@ BACKGROUND WATCHDOG:
   Kernel oops, panic, BUG, and hard LOCKUP still trip immediately.
   Sleep, hibernate, and lid-open thaw get a ~15s grace (~20s after boot):
   kernel freeze warnings and a compositor that is still coming back are
-  not treated as a crash. TTY3 asks for a local account password before the crash prompt
-  or the rescue menu. Returning to the desktop locks it again.
+  not treated as a crash. The crash screen itself has no password: it
+  names what died and asks whether to view recovery options. n returns
+  to the desktop. y asks for a local account password, then the rescue
+  menu. A normal F3 (no crash) still unlocks before the menu.
+  Returning to the desktop locks it again.
 
   If the fault is in Project Anthony itself (kernel comm truncated to
   project-anthony, or systemd restarted the monitor), the watchdog does
@@ -105,15 +108,11 @@ BACKGROUND WATCHDOG:
     Desktop compositor died
       Graphical session still registered, but cinnamon/gnome-shell/kwin
       is not running
-  Then it asks:
-    Would you like to restore from backup?
-    Type YES to restore, or n to skip.
-      YES → Timeshift restore (rolling snapshot, or the full wizard)
-      n   → Would you like to return to the desktop? [y/n]
-             y  → switch back to the graphical VT
-             n  → open the normal rescue menu
-    Menu option 3 still uses y/n; only the watchdog crash screen
-    requires YES so a panicky single keystroke cannot roll back.
+  Then it asks (no password yet):
+    Would you like to view recovery options? [y/n]
+      n → return to the graphical desktop
+      y → local account password, then the rescue menu
+          (Timeshift is menu option 3; that prompt is still y/n)
 
   Test the prompt without a real crash:
     sudo project-anthony --crash-prompt
@@ -123,7 +122,7 @@ COMMAND LINE:
   project-anthony                 Rescue TUI
   project-anthony --manual        This document
   sudo project-anthony --crash-prompt
-                                  Test the watchdog crash prompt (type YES)
+                                  Test the watchdog crash prompt (y/n)
 
 UNINSTALL:
   Type u or uninstall at the rescue menu. From a living desktop that
@@ -155,9 +154,10 @@ SYSTEM ALTERATIONS MADE:
   - Watchdog / system log: /var/log/project-anthony/system.log (root-only)
 
 SECURITY NOTE:
-  TTY3 still runs as root so a frozen machine can be recovered, but the
-  menu and crash-restore prompt stay locked until a local account
-  username and password are accepted. The unlock prompt does not
+  TTY3 still runs as root so a frozen machine can be recovered. The
+  crash notice (what died, view recovery options y/n) is shown
+  unlocked; n returns to the desktop. The rescue menu stays locked
+  until a local account username and password are accepted. The unlock prompt does not
   pre-fill the username. After unlock,
   60 seconds idle at a prompt relocks the console. Failed unlocks wait
   10s after tries 1–2, 60s after try 3, 3 minutes after try 4; the

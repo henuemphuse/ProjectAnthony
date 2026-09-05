@@ -4,10 +4,10 @@
 #   PROJECT ANTHONY: CORE EMERGENCY TUI RECOVERY ENGINE (LIFERAFT)
 # =========================================================================
 # Description: Entry point installed as /usr/local/bin/project-anthony.
-#              Loads helpers from a root-owned library directory. TTY3
-#              password unlock still runs in this process before the
-#              crash prompt or rescue menu. --uninstall is root-only
-#              (same as before) and does not load the TUI or auth code.
+#              Loads helpers from a root-owned library directory. A
+#              watchdog crash screen is shown before unlock; the rescue
+#              menu still requires a local password on TTY3. --uninstall
+#              is root-only and does not load the TUI or auth code.
 # =========================================================================
 
 if [ "$1" == "--manual" ] || [ "$1" == "--help" ]; then
@@ -101,16 +101,25 @@ if [ "$1" != "--run-core-menu" ] && [ "$1" != "--crash-prompt" ] && [ "$1" != "-
     exec gnome-terminal --full-screen --zoom="$ZOOM_SCALE" -- "$0" --run-core-menu
 fi
 
-# Auth, crash prompt, and menu are the same process. Unlock still happens
-# before any of those surfaces on a kernel VT.
+# Auth, crash prompt, and menu are the same process. The crash notice is
+# shown before unlock so the user can see what died without a password.
 pa_source auth.sh
 pa_source tui.sh
 pa_source tui-storage.sh
 pa_source tui-crash.sh
 pa_source tui-menu.sh
 
-# TTY3 / crash console is already root. Unlock with a local password before
-# the crash restore prompt or the rescue menu. Desktop Ctrl+Alt+X is unchanged.
+# 🚨 Watchdog intercept: crash flag from the monitor, or an explicit test flag.
+# n on this screen returns to the desktop. y continues to unlock (TTY3)
+# and then the rescue menu.
+CRASH_WANTS_RECOVERY=0
+if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(head -n1 "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
+    crash_recovery_prompt "$1"
+    CRASH_WANTS_RECOVERY=1
+fi
+
+# TTY3 is already root. Unlock with a local password before the rescue
+# menu. Desktop Ctrl+Alt+X is unchanged.
 if [ "$ON_KERNEL_VT" -eq 1 ]; then
     require_console_auth || exit 1
 elif [ "$(id -u)" -ne 0 ] && [ -x /usr/local/bin/project-anthony-bind-hotkeys ]; then
@@ -118,9 +127,10 @@ elif [ "$(id -u)" -ne 0 ] && [ -x /usr/local/bin/project-anthony-bind-hotkeys ];
     /usr/local/bin/project-anthony-bind-hotkeys >/dev/null 2>&1 || true
 fi
 
-# 🚨 Watchdog intercept: crash flag from the monitor, or an explicit test flag
-if [ "$1" == "--crash-prompt" ] || { [ -f "$STATE_FILE" ] && [ "$(head -n1 "$STATE_FILE" 2>/dev/null)" = "CRASH_TRIGGERED" ]; }; then
-    crash_recovery_prompt "$1"
+# Crash latch stays until unlock succeeds so a hung_task repeat cannot
+# restart TTY3 during the password prompt.
+if [ "$CRASH_WANTS_RECOVERY" -eq 1 ]; then
+    rm -f "$STATE_FILE"
 fi
 
 run_core_menu
