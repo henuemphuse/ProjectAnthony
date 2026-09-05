@@ -1,6 +1,6 @@
 # Sourced by /usr/local/bin/project-anthony. Not a standalone program.
 # Main rescue menu: draw the option list, read a choice, dispatch it.
-# Sub-screens live in tui.sh / tui-storage.sh. Crash prompt is tui-crash.sh.
+# Sub-screens live in tui.sh / tui-storage.sh. Crash notice is tui-crash.sh.
 
 draw_core_menu() {
     clear

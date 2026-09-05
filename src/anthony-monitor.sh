@@ -437,10 +437,18 @@ record_systemd_restart_if_any() {
     logger -t project-anthony-monitor "Monitor restarted by systemd (NRestarts=${n}); logged, not switching to TTY3"
 }
 
+# Crash UI is in progress until the TUI removes STATE_FILE (user declined
+# recovery, or they unlocked into the rescue menu). Do not rewrite that
+# file or restart TTY3 while it exists — a second restart would wipe the
+# screen they are already on.
+crash_prompt_pending() {
+    [ -f "$STATE_FILE" ]
+}
+
 trigger_rescue() {
     # Never start or restart units after systemd has begun shutting down.
     system_shutting_down && return 0
-    if [ -f "$STATE_FILE" ]; then
+    if crash_prompt_pending; then
         chvt 3 2>/dev/null || true
         return 0
     fi
@@ -469,7 +477,11 @@ trigger_rescue() {
 bump_cursor
 [ -f "$STATE_FILE" ] && chmod 600 "$STATE_FILE" 2>/dev/null || true
 record_systemd_restart_if_any
+# In-memory latch is not enough: bump_cursor drops the original journal
+# evidence, hung_task lines repeat, and a monitor restart forgets LATCHED.
+# STATE_FILE is the durable "already on the crash screen" flag.
 LATCHED=0
+crash_prompt_pending && LATCHED=1
 
 while true; do
     now=$(date +%s)
@@ -504,6 +516,15 @@ while true; do
     fi
 
     if [ $((now - STARTED_AT)) -lt "$BOOT_GRACE_SEC" ]; then
+        sleep "$POLL_SEC"
+        continue
+    fi
+
+    # TTY3 is already presenting this crash. Stay quiet until the prompt
+    # is dismissed; do not collect a new report or restart the TUI.
+    if crash_prompt_pending; then
+        LATCHED=1
+        hold_reset
         sleep "$POLL_SEC"
         continue
     fi
@@ -549,7 +570,7 @@ while true; do
         hold_reset
         bump_cursor
     else
-        LATCHED=0
+        crash_prompt_pending || LATCHED=0
     fi
     sleep "$POLL_SEC"
 done
