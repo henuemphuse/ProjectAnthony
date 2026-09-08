@@ -10,8 +10,6 @@ QUICK START (read this first):
   TUI key h              Open this document from the rescue menu
   This document          Opens automatically after install
 
-  Ctrl+Alt+Del stays as the normal logout dialog.
-
 DESCRIPTION:
   Project Anthony is a lightweight Text User Interface (TUI) environment
   engineered to serve as an indestructible system control interface.
@@ -27,7 +25,6 @@ RECOVERY LAYERS:
   1. Desktop alive (Cinnamon still processing keys)
        [Ctrl] + [Alt] + [X]
        Opens Project Anthony full-screen over the current session.
-       Ctrl+Alt+Del remains the stock logout dialog.
 
   2. Desktop frozen, kernel + systemd still alive
        [Ctrl] + [Alt] + [F3]
@@ -136,7 +133,7 @@ SYSTEM ALTERATIONS MADE:
   - Manual opener: /usr/local/bin/project-anthony-show-manual
   - Automated Background Script: Placed into /usr/local/bin/liferaft-autosnap.sh
   - System Package Layer Hook: Injected to /etc/apt/apt.conf.d/99-liferaft-autosnap
-  - Cinnamon Ctrl+Alt+X bound to Project Anthony (Ctrl+Alt+Del stays logout).
+  - Cinnamon Ctrl+Alt+X bound to Project Anthony.
     The binder toggles Cinnamon's custom-list so the grab actually reloads.
     Uninstall runs project-anthony-bind-hotkeys --unbind so Ctrl+Alt+X clears.
   - Menu + Desktop launchers: Project Anthony Rescue and Project Anthony Manual
